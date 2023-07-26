@@ -43,7 +43,7 @@ class SleepCommand implements CommandInterface
     }
 }
 
-(new Supervisor(__DIR__ ))
+(new Supervisor('/some/directory/you/want/to/store/your/state'))
     ->withCommand(new SleepCommand(10, 2))
     ->withCommand(new SleepCommand(20, 4))
     ->supervise()

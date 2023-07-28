@@ -26,6 +26,11 @@ class Supervisor
      */
     private array $commands = [];
 
+    /**
+     * @var array<int, Process>
+     */
+    private array $childProcesses = [];
+
     public function __construct(private string $storageDirectory)
     {
         $this->lockFactory = new LockFactory(new FlockStore($storageDirectory));
@@ -50,10 +55,11 @@ class Supervisor
         $end = time() + 55;
         $tick = 1;
 
+        // Supervise for as long as we did not hit $end
         while (time() <= $end) {
             $this->doSupervise();
 
-            // we check every 5 seconds whether we need to restart processes, that should be fine
+            // we check every 5 seconds whether we need to restart processes, this should be fine
             sleep(5);
 
             if (null !== $onTick) {
@@ -62,6 +68,23 @@ class Supervisor
 
             ++$tick;
         }
+
+        // Okay, we are done supervising. Now we might have child processes that are still running. We have to wait
+        // for them to finish. Only then we can exit ourselves otherwise we'd kill the children
+        while ($this->hasRunningChildProcesses()) {
+            sleep(5);
+        }
+    }
+
+    private function hasRunningChildProcesses(): bool
+    {
+        foreach ($this->childProcesses as $process) {
+            if ($process->isRunning()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function doSupervise(): void
@@ -72,32 +95,41 @@ class Supervisor
                     $this->storage = json_decode(file_get_contents($this->getStorageFile()), true);
                 }
 
-                // Check which processes are still running
-                $storageNew = [];
-
-                foreach ($this->storage as $commandLine => $pids) {
-                    foreach ($pids as $pid) {
-                        if ($this->isRunningPid($pid)) {
-                            $storageNew[$commandLine][] = $pid;
-                        }
-                    }
-                }
+                // Update the storage with still running processes
+                $this->checkRunningProcesses();
 
                 // Pad commands
                 foreach ($this->commands as $command) {
-                    $storageNew = $this->padCommand($command, $storageNew);
+                    $this->padCommand($command);
                 }
 
                 // Save  state
-                $this->storage = $storageNew;
-                $this->filesystem->dumpFile($this->getStorageFile(), json_encode($storageNew));
+                $this->filesystem->dumpFile($this->getStorageFile(), json_encode($this->storage));
             }
         );
     }
 
-    private function padCommand(CommandInterface $command, array $storage): array
+    private function checkRunningProcesses(): void
     {
-        $running = !isset($storage[$command->getIdentifier()]) ? 0 : \count($storage[$command->getIdentifier()]);
+        $storageNew = [];
+
+        foreach ($this->storage as $commandLine => $pids) {
+            foreach ($pids as $pid) {
+                if ($this->isRunningPid($pid)) {
+                    $storageNew[$commandLine][] = $pid;
+                } else {
+                    // Remove the PID from our own child processes if it's not running anymore
+                    unset($this->childProcesses[$pid]);
+                }
+            }
+        }
+
+        $this->storage = $storageNew;
+    }
+
+    private function padCommand(CommandInterface $command): void
+    {
+        $running = !isset($this->storage[$command->getIdentifier()]) ? 0 : \count($this->storage[$command->getIdentifier()]);
         $required = $command->getNumProcs() - $running;
 
         if ($required > 0) {
@@ -105,12 +137,14 @@ class Supervisor
                 $process = $command->startNewProcess();
 
                 if (null !== $process->getPid()) {
-                    $storage[$command->getIdentifier()][] = $process->getPid();
+                    $this->storage[$command->getIdentifier()][] = $process->getPid();
+
+                    // Remember started child processes because we have to remain running in order for those child processes
+                    // not to get killed.
+                    $this->childProcesses[$process->getPid()] = $process;
                 }
             }
         }
-
-        return $storage;
     }
 
     private function getStorageFile(): string

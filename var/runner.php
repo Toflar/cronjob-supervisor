@@ -33,7 +33,8 @@ class SleepCommand implements CommandInterface
 
 (new Supervisor(__DIR__ . '/storage'))
     ->withCommand(new SleepCommand(10, 2))
-    ->withCommand(new SleepCommand(20, 4))
+    ->withCommand(new SleepCommand(20, 2))
+    ->withCommand(new SleepCommand(100, 2)) // Mock a process that will take longer than the 55 seconds of the supervisor itself
     ->supervise(function(int $tick) {
         echo 'Tick: ' . $tick;
     })

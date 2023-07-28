@@ -12,6 +12,7 @@ class SupervisorTest extends TestCase
 {
     public function testSupervising(): void
     {
+        $start = time();
         $php = (new PhpExecutableFinder())->find();
 
         $processes = [];
@@ -40,6 +41,10 @@ class SupervisorTest extends TestCase
 
             sleep(5);
         }
+
+        // The runner.php has a process that runs 100 seconds, so our supervisor must run at least 100 seconds, otherwise
+        // it would've killed the child process
+        $this->assertGreaterThanOrEqual(100, time() - $start);
     }
 
     private function simulateRunner(string $php): Process

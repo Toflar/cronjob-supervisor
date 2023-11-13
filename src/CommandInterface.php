@@ -10,7 +10,7 @@ interface CommandInterface
 {
     public function getIdentifier(): string;
 
-    public function getNumProcs();
+    public function getNumProcs(): int;
 
     public function startNewProcess(): Process;
 }

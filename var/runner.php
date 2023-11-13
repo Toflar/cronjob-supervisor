@@ -17,7 +17,7 @@ class SleepCommand implements CommandInterface
         return 'sleep ' . $this->sleep;
     }
 
-    public function getNumProcs()
+    public function getNumProcs(): int
     {
         return $this->numProcs;
     }

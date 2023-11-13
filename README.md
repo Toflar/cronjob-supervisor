@@ -29,7 +29,7 @@ class SleepCommand implements CommandInterface
         return 'sleep ' . $this->sleep;
     }
 
-    public function getNumProcs()
+    public function getNumProcs(); int
     {
         return $this->numProcs;
     }
@@ -58,7 +58,4 @@ class SleepCommand implements CommandInterface
 That's it. The `Supervisor` will take care that even if your jobs are still running after a minute has passed, only 
 ever your maximum number of processes will be created.
 
-**Important:**
-
-Do not expect any support for this library - it's just a quick hack trying to solve some issue for a personal 
-project. If it comes in handy for you - go ahead and use it.
+For this to work, it uses `ps -p <pid>` to check for the process details. Windows is currently not supported.

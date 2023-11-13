@@ -13,8 +13,8 @@ class Supervisor
 {
     private const LOCK_NAME = 'cronjob-supervisor-lock';
 
-    private LockFactory $lockFactory;
-    private Filesystem $filesystem;
+    private readonly LockFactory $lockFactory;
+    private readonly Filesystem $filesystem;
 
     /**
      * @var array<string, array<int>>
@@ -31,7 +31,7 @@ class Supervisor
      */
     private array $childProcesses = [];
 
-    public function __construct(private string $storageDirectory)
+    public function __construct(private readonly string $storageDirectory)
     {
         $this->lockFactory = new LockFactory(new FlockStore($storageDirectory));
         $this->filesystem = new Filesystem();
@@ -92,7 +92,7 @@ class Supervisor
         $this->executeLocked(
             function (): void {
                 if ($this->filesystem->exists($this->getStorageFile())) {
-                    $this->storage = json_decode(file_get_contents($this->getStorageFile()), true);
+                    $this->storage = json_decode(file_get_contents($this->getStorageFile()), true, 512, JSON_THROW_ON_ERROR);
                 }
 
                 // Update the storage with still running processes
@@ -104,7 +104,7 @@ class Supervisor
                 }
 
                 // Save  state
-                $this->filesystem->dumpFile($this->getStorageFile(), json_encode($this->storage));
+                $this->filesystem->dumpFile($this->getStorageFile(), json_encode($this->storage, JSON_THROW_ON_ERROR));
             }
         );
     }

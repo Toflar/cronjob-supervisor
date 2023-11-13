@@ -15,37 +15,16 @@ can configure a minutely cronjob? This library might come in handy for you then.
 require_once 'vendor/autoload.php';
 
 use Symfony\Component\Process\Process;
-use Toflar\CronjobSupervisor\CommandInterface;
+use Toflar\CronjobSupervisor\BasicCommand;
 use Toflar\CronjobSupervisor\Supervisor;
 
-class SleepCommand implements CommandInterface
-{
-    public function __construct(private int $sleep, private int $numProcs)
-    {
-    }
-
-    public function getIdentifier(): string
-    {
-        return 'sleep ' . $this->sleep;
-    }
-
-    public function getNumProcs(); int
-    {
-        return $this->numProcs;
-    }
-
-    public function startNewProcess(): Process
-    {
-        $process = (new Process(['sleep' , $this->sleep]));
-        $process->start();
-
-        return $process;
-    }
-}
-
 (new Supervisor('/some/directory/you/want/to/store/your/state'))
-    ->withCommand(new SleepCommand(10, 2))
-    ->withCommand(new SleepCommand(20, 4))
+    ->withCommand(new BasicCommand('sleep 10', 2, function () {
+        return new Process(['sleep', '10']);
+    }))
+    ->withCommand(new BasicCommand('sleep 20', 4, function () {
+        return new Process(['sleep', '29']);
+    }))
     ->supervise()
 ;
 ```

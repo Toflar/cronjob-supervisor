@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Toflar\CronjobSupervisor;
 
+use Psr\Log\LoggerInterface;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Lock\LockFactory;
 use Symfony\Component\Lock\Store\FlockStore;
+use Symfony\Component\Process\Exception\ProcessFailedException;
 use Symfony\Component\Process\Process;
 
 class Supervisor
@@ -32,8 +34,10 @@ class Supervisor
      */
     private array $childProcesses = [];
 
-    public function __construct(private readonly string $storageDirectory)
-    {
+    public function __construct(
+        private readonly string $storageDirectory,
+        public readonly LoggerInterface|null $logger,
+    ) {
         $this->lockFactory = new LockFactory(new FlockStore($storageDirectory));
         $this->filesystem = new Filesystem();
 
@@ -169,25 +173,29 @@ class Supervisor
 
     private function isRunningPid(int $pid): bool
     {
-        if ('\\' === \DIRECTORY_SEPARATOR) {
-            $process = new Process(['tasklist', '/FI', "PID eq $pid"]);
-            $process->run();
-            
-            // Symfony Process starts Windows processes via cmd.exe
-            return str_contains($process->getOutput(), 'cmd.exe');
-        }
+        try {
+            if ('\\' === \DIRECTORY_SEPARATOR) {
+                $process = new Process(['tasklist', '/FI', "PID eq $pid"]);
+                $process->mustRun();
 
-        $process = new Process(['ps', '-p', $pid]);
-        $exitCode = $process->run();
+                // Symfony Process starts Windows processes via cmd.exe
+                return str_contains($process->getOutput(), 'cmd.exe');
+            }
 
-        if (0 !== $exitCode) {
-            return false;
-        }
+            $process = new Process(['ps', '-p', $pid]);
+            $process->mustRun();
 
-        // Check for defunct output. If the process was started within this very process,
-        // it will still be listed, although it's actually finished.
-        if (str_contains($process->getOutput(), '<defunct>')) {
-            return false;
+            // Check for defunct output. If the process was started within this very process,
+            // it will still be listed, although it's actually finished.
+            if (str_contains($process->getOutput(), '<defunct>')) {
+                return false;
+            }
+        } catch (ProcessFailedException $e) {
+            $this->logger?->critical('Could not run supervisor because there are no means to check if a PID is already running: '.$e->getMessage());
+
+            // If supervision doesn't work, we simulate a running process -> no new processes
+            // are started
+            return true;
         }
 
         return true;

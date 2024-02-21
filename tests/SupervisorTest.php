@@ -23,7 +23,8 @@ class SupervisorTest extends TestCase
         // Simulate concurrent cron (this should NOT cause additional workers to be started!)
         $processes[] = $this->simulateRunner($php);
 
-        // Simulate yet another concurrent cron (this should NOT cause additional workers to be started!)
+        // Simulate yet another concurrent cron (this should NOT cause additional workers
+        // to be started!)
         $processes[] = $this->simulateRunner($php);
 
         while (true) {
@@ -42,8 +43,8 @@ class SupervisorTest extends TestCase
             sleep(5);
         }
 
-        // The runner.php has a process that runs 100 seconds, so our supervisor must run at least 100 seconds, otherwise
-        // it would've killed the child process
+        // The runner.php has a process that runs 100 seconds, so our supervisor must run
+        // at least 100 seconds, otherwise it would've killed the child process
         $this->assertGreaterThanOrEqual(100, time() - $start);
     }
 
@@ -53,7 +54,7 @@ class SupervisorTest extends TestCase
         $p->start(
             function (): void {
                 $this->assertLessThanOrEqual(6, $this->countSleepProcesses());
-            }
+            },
         );
 
         return $p;

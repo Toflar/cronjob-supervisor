@@ -1,0 +1,75 @@
+name: CI
+
+on:
+    pull_request: ~
+    schedule:
+        - cron: 0 13 * * MON
+
+jobs:
+    cs:
+        name: Coding Style
+        runs-on: ubuntu-latest
+        steps:
+            - name: Setup PHP
+              uses: shivammathur/setup-php@v2
+              with:
+                  php-version: '8.3'
+                  coverage: none
+
+            - name: Checkout
+              uses: actions/checkout@v3
+
+            - name: Install the dependencies
+              run: composer update --no-interaction --no-suggest
+
+            - name: Run the CS fixer
+              run: composer cs-fixer
+
+    tests-linux:
+        name: 'Linux: PHP ${{ matrix.php }}'
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                php: ['8.1', '8.2', '8.3']
+        steps:
+            - name: Setup PHP
+              uses: shivammathur/setup-php@v2
+              with:
+                  php-version: ${{ matrix.php }}
+                  coverage: none
+
+            - name: Checkout
+              uses: actions/checkout@v3
+
+            - name: Install the dependencies
+              run: composer update --no-interaction --no-suggest
+
+            - name: Run the unit tests
+              run: composer unit-tests
+
+    tests-windows:
+        name: 'Windows: PHP ${{ matrix.php }}'
+        runs-on: windows-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                php: ['8.1', '8.2', '8.3']
+        steps:
+            - name: Set up Cygwin
+              uses: egor-tensin/setup-cygwin@v4
+
+            - name: Setup PHP
+              uses: shivammathur/setup-php@v2
+              with:
+                  php-version: ${{ matrix.php }}
+                  coverage: none
+
+            - name: Checkout
+              uses: actions/checkout@v3
+
+            - name: Install the dependencies
+              run: composer update --no-interaction --no-suggest
+
+            - name: Run the unit tests
+              run: composer unit-tests

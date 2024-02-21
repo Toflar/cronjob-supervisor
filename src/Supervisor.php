@@ -169,6 +169,14 @@ class Supervisor
 
     private function isRunningPid(int $pid): bool
     {
+        if ('\\' === \DIRECTORY_SEPARATOR) {
+            $process = new Process(['tasklist', '/FI', "PID eq $pid"]);
+            $process->run();
+            
+            // Symfony Process starts Windows processes via cmd.exe
+            return str_contains($process->getOutput(), 'cmd.exe');
+        }
+
         $process = new Process(['ps', '-p', $pid]);
         $exitCode = $process->run();
 

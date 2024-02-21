@@ -14,6 +14,7 @@ class Supervisor
     private const LOCK_NAME = 'cronjob-supervisor-lock';
 
     private readonly LockFactory $lockFactory;
+
     private readonly Filesystem $filesystem;
 
     /**
@@ -69,8 +70,9 @@ class Supervisor
             ++$tick;
         }
 
-        // Okay, we are done supervising. Now we might have child processes that are still running. We have to wait
-        // for them to finish. Only then we can exit ourselves otherwise we'd kill the children
+        // Okay, we are done supervising. Now we might have child processes that are
+        // still running. We have to wait for them to finish. Only then we can exit
+        // ourselves otherwise we'd kill the children
         while ($this->hasRunningChildProcesses()) {
             sleep(5);
         }
@@ -105,7 +107,7 @@ class Supervisor
 
                 // Save  state
                 $this->filesystem->dumpFile($this->getStorageFile(), json_encode($this->storage, JSON_THROW_ON_ERROR));
-            }
+            },
         );
     }
 
@@ -139,8 +141,8 @@ class Supervisor
                 if (null !== $process->getPid()) {
                     $this->storage[$command->getIdentifier()][] = $process->getPid();
 
-                    // Remember started child processes because we have to remain running in order for those child processes
-                    // not to get killed.
+                    // Remember started child processes because we have to remain running in order
+                    // for those child processes not to get killed.
                     $this->childProcesses[$process->getPid()] = $process;
                 }
             }
@@ -154,8 +156,8 @@ class Supervisor
 
     private function executeLocked(\Closure $closure): void
     {
-        // Library is meant to be used with minutely cronjobs. Thus, the default ttl of 300 is enough and does not need
-        // to be configurable.
+        // Library is meant to be used with minutely cronjobs. Thus, the default ttl of
+        // 300 is enough and does not need to be configurable.
         $lock = $this->lockFactory->createLock(self::LOCK_NAME);
         if (!$lock->acquire()) {
             return;
@@ -174,8 +176,8 @@ class Supervisor
             return false;
         }
 
-        // Check for defunct output. If the process was started within this very process, it will still be listed,
-        // although it's actually finished.
+        // Check for defunct output. If the process was started within this very process,
+        // it will still be listed, although it's actually finished.
         if (str_contains($process->getOutput(), '<defunct>')) {
             return false;
         }

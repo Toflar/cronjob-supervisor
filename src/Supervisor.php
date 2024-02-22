@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Toflar\CronjobSupervisor;
 
-use Psr\Log\LoggerInterface;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Lock\LockFactory;
 use Symfony\Component\Lock\Store\FlockStore;
-use Symfony\Component\Process\Exception\ProcessFailedException;
 use Symfony\Component\Process\Process;
+use Toflar\CronjobSupervisor\Provider\PosixProvider;
+use Toflar\CronjobSupervisor\Provider\ProviderInterface;
+use Toflar\CronjobSupervisor\Provider\PsProvider;
+use Toflar\CronjobSupervisor\Provider\WindowsTaskListProvider;
 
 class Supervisor
 {
@@ -34,14 +36,45 @@ class Supervisor
      */
     private array $childProcesses = [];
 
-    public function __construct(
+    /**
+     * @param array<ProviderInterface> $providers
+     */
+    private function __construct(
         private readonly string $storageDirectory,
-        public readonly LoggerInterface|null $logger,
+        private readonly array $providers,
     ) {
         $this->lockFactory = new LockFactory(new FlockStore($storageDirectory));
         $this->filesystem = new Filesystem();
 
         $this->filesystem->mkdir($this->storageDirectory);
+    }
+
+    public static function withDefaultProviders(string $storageDirectory): self
+    {
+        return new self($storageDirectory, [
+            new WindowsTaskListProvider(),
+            new PosixProvider(),
+            new PsProvider(),
+        ]);
+    }
+
+    /**
+     * @param array<ProviderInterface> $providers
+     */
+    public static function withProviders(string $storageDirectory, array $providers): self
+    {
+        return new self($storageDirectory, $providers);
+    }
+
+    public function canSupervise(): bool
+    {
+        foreach ($this->providers as $provider) {
+            if ($provider->isSupported()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function withCommand(CommandInterface $command): self
@@ -57,6 +90,10 @@ class Supervisor
      */
     public function supervise(\Closure|null $onTick = null): void
     {
+        if (!$this->canSupervise()) {
+            throw new \LogicException('No provider supported, cannot supervise!');
+        }
+
         $end = time() + 55;
         $tick = 1;
 
@@ -173,36 +210,12 @@ class Supervisor
 
     private function isRunningPid(int $pid): bool
     {
-        try {
-            if ('\\' === \DIRECTORY_SEPARATOR) {
-                $process = new Process(['tasklist', '/FI', "PID eq $pid"]);
-                $process->mustRun();
-
-                // Symfony Process starts Windows processes via cmd.exe
-                return str_contains($process->getOutput(), 'cmd.exe');
+        foreach ($this->providers as $provider) {
+            if ($provider->isSupported()) {
+                return $provider->isPidRunning($pid);
             }
-
-            // posix_getpgid returns false, if the process is not running anymore (see #3)
-            if (function_exists('posix_getpgid')) {
-                return false !== posix_getpgid($pid);
-            }
-
-            $process = new Process(['ps', '-p', $pid]);
-            $process->mustRun();
-
-            // Check for defunct output. If the process was started within this very process,
-            // it will still be listed, although it's actually finished.
-            if (str_contains($process->getOutput(), '<defunct>')) {
-                return false;
-            }
-        } catch (ProcessFailedException $e) {
-            $this->logger?->critical('Could not run supervisor because there are no means to check if a PID is already running: '.$e->getMessage());
-
-            // If supervision doesn't work, we simulate a running process -> no new processes
-            // are started
-            return true;
         }
 
-        return true;
+        return false;
     }
 }

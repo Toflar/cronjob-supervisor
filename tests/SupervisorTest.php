@@ -7,11 +7,23 @@ namespace Toflar\CronjobSupervisor\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\PhpExecutableFinder;
 use Symfony\Component\Process\Process;
+use Toflar\CronjobSupervisor\Supervisor;
 
 class SupervisorTest extends TestCase
 {
+    public function testCanSupervise(): void
+    {
+        $supervisor = Supervisor::withProviders(sys_get_temp_dir(), []);
+        $this->assertFalse($supervisor->canSupervise());
+    }
+
     public function testSupervising(): void
     {
+        $supervisor = Supervisor::withDefaultProviders(sys_get_temp_dir());
+        if (!$supervisor->canSupervise()) {
+            $this->markTestSkipped('Supervising is not supperted.');
+        }
+
         $start = time();
         $php = (new PhpExecutableFinder())->find();
 

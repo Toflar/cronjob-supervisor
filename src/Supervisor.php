@@ -182,6 +182,11 @@ class Supervisor
                 return str_contains($process->getOutput(), 'cmd.exe');
             }
 
+            // posix_getpgid returns false, if the process is not running anymore (see #3)
+            if (function_exists('posix_getpgid')) {
+                return false !== posix_getpgid($pid);
+            }
+
             $process = new Process(['ps', '-p', $pid]);
             $process->mustRun();
 

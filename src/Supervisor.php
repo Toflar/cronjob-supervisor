@@ -8,12 +8,17 @@ use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Lock\LockFactory;
 use Symfony\Component\Lock\Store\FlockStore;
 use Symfony\Component\Process\Process;
+use Toflar\CronjobSupervisor\Provider\PosixProvider;
+use Toflar\CronjobSupervisor\Provider\ProviderInterface;
+use Toflar\CronjobSupervisor\Provider\PsProvider;
+use Toflar\CronjobSupervisor\Provider\WindowsTaskListProvider;
 
 class Supervisor
 {
     private const LOCK_NAME = 'cronjob-supervisor-lock';
 
     private readonly LockFactory $lockFactory;
+
     private readonly Filesystem $filesystem;
 
     /**
@@ -31,12 +36,64 @@ class Supervisor
      */
     private array $childProcesses = [];
 
-    public function __construct(private readonly string $storageDirectory)
-    {
+    /**
+     * @param array<ProviderInterface> $providers
+     */
+    private function __construct(
+        private readonly string $storageDirectory,
+        private readonly array $providers,
+    ) {
         $this->lockFactory = new LockFactory(new FlockStore($storageDirectory));
         $this->filesystem = new Filesystem();
 
         $this->filesystem->mkdir($this->storageDirectory);
+    }
+
+    public static function withDefaultProviders(string $storageDirectory): self
+    {
+        return new self($storageDirectory, self::getDefaultProviders());
+    }
+
+    public static function getDefaultProviders(): array
+    {
+        return [
+            new WindowsTaskListProvider(),
+            new PosixProvider(),
+            new PsProvider(),
+        ];
+    }
+
+    /**
+     * @param array<ProviderInterface> $providers
+     */
+    public static function withProviders(string $storageDirectory, array $providers): self
+    {
+        return new self($storageDirectory, $providers);
+    }
+
+    /**
+     * @param array<ProviderInterface> $providers
+     */
+    public static function canSuperviseWithProviders(array $providers): bool
+    {
+        foreach ($providers as $provider) {
+            if ($provider->isSupported()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public function canSupervise(): bool
+    {
+        foreach ($this->providers as $provider) {
+            if ($provider->isSupported()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function withCommand(CommandInterface $command): self
@@ -52,6 +109,10 @@ class Supervisor
      */
     public function supervise(\Closure|null $onTick = null): void
     {
+        if (!$this->canSupervise()) {
+            throw new \LogicException('No provider supported, cannot supervise!');
+        }
+
         $end = time() + 55;
         $tick = 1;
 
@@ -69,8 +130,9 @@ class Supervisor
             ++$tick;
         }
 
-        // Okay, we are done supervising. Now we might have child processes that are still running. We have to wait
-        // for them to finish. Only then we can exit ourselves otherwise we'd kill the children
+        // Okay, we are done supervising. Now we might have child processes that are
+        // still running. We have to wait for them to finish. Only then we can exit
+        // ourselves otherwise we'd kill the children
         while ($this->hasRunningChildProcesses()) {
             sleep(5);
         }
@@ -105,7 +167,7 @@ class Supervisor
 
                 // Save  state
                 $this->filesystem->dumpFile($this->getStorageFile(), json_encode($this->storage, JSON_THROW_ON_ERROR));
-            }
+            },
         );
     }
 
@@ -139,8 +201,8 @@ class Supervisor
                 if (null !== $process->getPid()) {
                     $this->storage[$command->getIdentifier()][] = $process->getPid();
 
-                    // Remember started child processes because we have to remain running in order for those child processes
-                    // not to get killed.
+                    // Remember started child processes because we have to remain running in order
+                    // for those child processes not to get killed.
                     $this->childProcesses[$process->getPid()] = $process;
                 }
             }
@@ -154,8 +216,8 @@ class Supervisor
 
     private function executeLocked(\Closure $closure): void
     {
-        // Library is meant to be used with minutely cronjobs. Thus, the default ttl of 300 is enough and does not need
-        // to be configurable.
+        // Library is meant to be used with minutely cronjobs. Thus, the default ttl of
+        // 300 is enough and does not need to be configurable.
         $lock = $this->lockFactory->createLock(self::LOCK_NAME);
         if (!$lock->acquire()) {
             return;
@@ -167,19 +229,12 @@ class Supervisor
 
     private function isRunningPid(int $pid): bool
     {
-        $process = new Process(['ps', '-p', $pid]);
-        $exitCode = $process->run();
-
-        if (0 !== $exitCode) {
-            return false;
+        foreach ($this->providers as $provider) {
+            if ($provider->isSupported()) {
+                return $provider->isPidRunning($pid);
+            }
         }
 
-        // Check for defunct output. If the process was started within this very process, it will still be listed,
-        // although it's actually finished.
-        if (str_contains($process->getOutput(), '<defunct>')) {
-            return false;
-        }
-
-        return true;
+        return false;
     }
 }

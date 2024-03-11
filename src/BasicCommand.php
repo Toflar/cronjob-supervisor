@@ -14,7 +14,6 @@ class BasicCommand implements CommandInterface
         /** @var \Closure():Process */
         private readonly \Closure $createProcess,
     ) {
-
     }
 
     public function getIdentifier(): string

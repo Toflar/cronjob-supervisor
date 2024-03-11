@@ -6,7 +6,7 @@ use Symfony\Component\Process\Process;
 use Toflar\CronjobSupervisor\BasicCommand;
 use Toflar\CronjobSupervisor\Supervisor;
 
-(new Supervisor(__DIR__ . '/storage'))
+(Supervisor::withDefaultProviders(__DIR__ . '/storage'))
     ->withCommand(new BasicCommand('sleep 10', 2, function () {
         return new Process(['sleep', '10']);
     }))

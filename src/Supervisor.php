@@ -51,11 +51,16 @@ class Supervisor
 
     public static function withDefaultProviders(string $storageDirectory): self
     {
-        return new self($storageDirectory, [
+        return new self($storageDirectory, self::getDefaultProviders());
+    }
+
+    public static function getDefaultProviders(): array
+    {
+        return [
             new WindowsTaskListProvider(),
             new PosixProvider(),
             new PsProvider(),
-        ]);
+        ];
     }
 
     /**
@@ -64,6 +69,20 @@ class Supervisor
     public static function withProviders(string $storageDirectory, array $providers): self
     {
         return new self($storageDirectory, $providers);
+    }
+
+    /**
+     * @param array<ProviderInterface> $providers
+     */
+    public static function canSuperviseWithProviders(array $providers): bool
+    {
+        foreach ($providers as $provider) {
+            if ($provider->isSupported()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function canSupervise(): bool

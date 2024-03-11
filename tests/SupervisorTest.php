@@ -15,6 +15,7 @@ class SupervisorTest extends TestCase
     {
         $supervisor = Supervisor::withProviders(sys_get_temp_dir(), []);
         $this->assertFalse($supervisor->canSupervise());
+        $this->assertFalse(Supervisor::canSuperviseWithProviders([]));
     }
 
     public function testSupervising(): void

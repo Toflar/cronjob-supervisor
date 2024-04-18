@@ -18,8 +18,9 @@ use Symfony\Component\Process\Process;
 use Toflar\CronjobSupervisor\BasicCommand;
 use Toflar\CronjobSupervisor\Supervisor;
 
-(new Supervisor('/some/directory/you/want/to/store/your/state'))
-    ->withCommand(new BasicCommand('sleep 10', 2, function () {
+    $supervisor = Supervisor::withDefaultProviders('/some/directory/you/want/to/store/your/state');
+    
+    $supervisor->withCommand(new BasicCommand('sleep 10', 2, function () {
         return new Process(['sleep', '10']);
     }))
     ->withCommand(new BasicCommand('sleep 20', 4, function () {

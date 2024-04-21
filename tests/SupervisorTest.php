@@ -75,15 +75,21 @@ class SupervisorTest extends TestCase
 
     private function countSleepProcesses(): int
     {
-        $ps = new Process(['ps', 'aux']);
-        $ps->run();
+        $fo = new \SplFileObject(__DIR__ . '/../var/storage/storage.json');
+        $arrPids = json_decode($fo->current(), true);
 
-        $grep = (new Process(['grep', '[s]leep']))->setInput($ps->getOutput());
-        $grep->run();
+        $pidsForChecking = array();
+        foreach ($arrPids as $pids) {
+            $pidsForChecking = array_merge($pidsForChecking, $pids);
+        }
 
-        $wc = (new Process(['wc', '-l']))->setInput($grep->getOutput());
-        $wc->run();
+        $pidsOperatingSystem = array();
 
-        return (int) trim($wc->getOutput());
+        (new Process(['pgrep', '-f', "[s]leep"]))
+            ->run(function ($pid) use (&$pidsOperatingSystem) {
+                $pidsOperatingSystem = preg_split('/\r\n|\r|\n/', trim($pid));
+            });
+        
+        return count(array_intersect($pidsForChecking, $pidsOperatingSystem));
     }
 }

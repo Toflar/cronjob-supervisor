@@ -154,7 +154,11 @@ class Supervisor
         $this->executeLocked(
             function (): void {
                 if ($this->filesystem->exists($this->getStorageFile())) {
-                    $this->storage = json_decode(file_get_contents($this->getStorageFile()), true, 512, JSON_THROW_ON_ERROR);
+                    try {
+                        $this->storage = json_decode(file_get_contents($this->getStorageFile()), true, 512, JSON_THROW_ON_ERROR);
+                    } catch (\JsonException) {
+                        $this->storage = [];
+                    }
                 }
 
                 // Update the storage with still running processes

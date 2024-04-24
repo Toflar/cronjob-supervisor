@@ -20,12 +20,13 @@ use Toflar\CronjobSupervisor\Supervisor;
 
     $supervisor = Supervisor::withDefaultProviders('/some/directory/you/want/to/store/your/state');
     
-    $supervisor->withCommand(new BasicCommand('sleep 10', 2, function () {
-        return new Process(['sleep', '10']);
-    }))
-    ->withCommand(new BasicCommand('sleep 20', 4, function () {
-        return new Process(['sleep', '29']);
-    }))
+    $supervisor
+        ->withCommand(new BasicCommand('sleep 10', 2, function () {
+            return new Process(['sleep', '10']);
+        }))
+        ->withCommand(new BasicCommand('sleep 29', 4, function () {
+            return new Process(['sleep', '29']);
+        }))
     ->supervise()
 ;
 ```
@@ -38,4 +39,10 @@ use Toflar\CronjobSupervisor\Supervisor;
 That's it. The `Supervisor` will take care that even if your jobs are still running after a minute has passed, only 
 ever your maximum number of processes will be created.
 
-For this to work, it uses `ps -p <pid>` to check for the process details. Windows is currently not supported.
+For this to work, it uses multiple providers to check if processes are still running. Currently supported are:
+
+* `posix_getpgid()`
+* `ps -p <pid>`
+* `tasklist /FI PID eq <pid>`
+
+Which means you should be able to run it on most Linux and Windows combinations.

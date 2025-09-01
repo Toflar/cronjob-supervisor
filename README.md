@@ -41,7 +41,6 @@ ever your maximum number of processes will be created.
 
 For this to work, it uses multiple providers to check if processes are still running. Currently supported are:
 
-* `posix_getpgid()`
 * `ps -p <pid>`
 * `tasklist /FI PID eq <pid>`
 

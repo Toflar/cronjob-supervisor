@@ -11,7 +11,9 @@ class BasicCommand implements CommandInterface
     public function __construct(
         private readonly string $identifier,
         private readonly int $numProcs,
-        /** @var \Closure():Process */
+        /**
+         * @var \Closure():Process
+         */
         private readonly \Closure $createProcess,
     ) {
     }

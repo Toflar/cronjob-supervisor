@@ -8,7 +8,6 @@ use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Lock\LockFactory;
 use Symfony\Component\Lock\Store\FlockStore;
 use Symfony\Component\Process\Process;
-use Toflar\CronjobSupervisor\Provider\PosixProvider;
 use Toflar\CronjobSupervisor\Provider\ProviderInterface;
 use Toflar\CronjobSupervisor\Provider\PsProvider;
 use Toflar\CronjobSupervisor\Provider\WindowsTaskListProvider;
@@ -58,7 +57,6 @@ class Supervisor
     {
         return [
             new WindowsTaskListProvider(),
-            new PosixProvider(),
             new PsProvider(),
         ];
     }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Toflar\CronjobSupervisor;
 
 use Symfony\Component\Filesystem\Filesystem;
+use Symfony\Component\Lock\Exception\ExceptionInterface;
 use Symfony\Component\Lock\LockFactory;
 use Symfony\Component\Lock\Store\FlockStore;
 use Symfony\Component\Process\Process;
@@ -221,12 +222,17 @@ class Supervisor
         // Library is meant to be used with minutely cronjobs. Thus, the default ttl of
         // 300 is enough and does not need to be configurable.
         $lock = $this->lockFactory->createLock(self::LOCK_NAME);
-        if (!$lock->acquire()) {
-            return;
-        }
 
-        $closure();
-        $lock->release();
+        try {
+            if (!$lock->acquire()) {
+                return;
+            }
+
+            $closure();
+            $lock->release();
+        } catch (ExceptionInterface) {
+            // Catch only lock component related exceptions. Noop.
+        }
     }
 
     private function isRunningPid(int $pid): bool

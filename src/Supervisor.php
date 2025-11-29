@@ -15,6 +15,8 @@ use Toflar\CronjobSupervisor\Provider\WindowsTaskListProvider;
 
 class Supervisor
 {
+    private const DEFAULT_TICK_FREQUENCY = 10;
+
     private const LOCK_NAME = 'cronjob-supervisor-lock';
 
     private readonly LockFactory $lockFactory;
@@ -103,10 +105,7 @@ class Supervisor
         return $clone;
     }
 
-    /**
-     * @param int $onTick library is meant to be called every minute by a cronjob, so 55 seconds is default
-     */
-    public function supervise(\Closure|null $onTick = null): void
+    public function supervise(\Closure|null $onTick = null, int $tickFrequency = self::DEFAULT_TICK_FREQUENCY): void
     {
         if (!$this->canSupervise()) {
             throw new \LogicException('No provider supported, cannot supervise!');
@@ -119,8 +118,8 @@ class Supervisor
         while (time() <= $end) {
             $this->doSupervise();
 
-            // we check every 5 seconds whether we need to restart processes, this should be fine
-            sleep(5);
+            // we check every $tickFrequency seconds whether we need to restart processes
+            sleep($tickFrequency);
 
             if (null !== $onTick) {
                 $onTick($tick);
@@ -133,7 +132,7 @@ class Supervisor
         // still running. We have to wait for them to finish. Only then we can exit
         // ourselves otherwise we'd kill the children
         while ($this->hasRunningChildProcesses()) {
-            sleep(5);
+            sleep($tickFrequency);
         }
     }
 

@@ -35,6 +35,7 @@
         }
     },
     "scripts": {
-        "unit-tests": "@php vendor/bin/phpunit"
+        "unix-tests": "@php vendor/bin/phpunit --testsuite=unix",
+        "windows-tests": "@php vendor/bin/phpunit --testsuite=windows"
     }
 }

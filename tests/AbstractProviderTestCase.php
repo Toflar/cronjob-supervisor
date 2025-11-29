@@ -4,13 +4,22 @@ declare(strict_types=1);
 
 namespace Toflar\CronjobSupervisor\Test;
 
+use PHPUnit\Framework\Attributes\AfterClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Process\PhpExecutableFinder;
 use Symfony\Component\Process\Process;
+use Toflar\CronjobSupervisor\Provider\ProviderInterface;
 use Toflar\CronjobSupervisor\Supervisor;
 
-class SupervisorTest extends TestCase
+abstract class AbstractProviderTestCase extends TestCase
 {
+    /**
+     * @var array<string>
+     */
+    protected array $tmpDataDirs = [];
+
     public function testCanSupervise(): void
     {
         $supervisor = Supervisor::withProviders(sys_get_temp_dir(), []);
@@ -18,11 +27,12 @@ class SupervisorTest extends TestCase
         $this->assertFalse(Supervisor::canSuperviseWithProviders([]));
     }
 
-    public function testSupervising(): void
+    #[DataProvider('provideProviders')]
+    public function testSupervising(ProviderInterface $provider): void
     {
-        $supervisor = Supervisor::withDefaultProviders(sys_get_temp_dir());
+        $supervisor = Supervisor::withProviders($this->createTemporaryDirectory(), [$provider]);
         if (!$supervisor->canSupervise()) {
-            $this->markTestSkipped('Supervising is not supperted.');
+            $this->fail('Cannot supervise with '.$provider::class);
         }
 
         $start = time();
@@ -59,6 +69,32 @@ class SupervisorTest extends TestCase
         // The runner.php has a process that runs 100 seconds, so our supervisor must run
         // at least 100 seconds, otherwise it would've killed the child process
         $this->assertGreaterThanOrEqual(100, time() - $start);
+    }
+
+    /**
+     * @return array<ProviderInterface>
+     */
+    abstract public static function provideProviders(): iterable;
+
+    protected function createTemporaryDirectory(): string
+    {
+        $dir = sys_get_temp_dir().'/'.uniqid('lt');
+        $this->tmpDataDirs[] = $dir;
+
+        $fs = new Filesystem();
+        $fs->mkdir($dir);
+
+        return $dir;
+    }
+
+    #[AfterClass]
+    private function clearTemporaryDirectory(): void
+    {
+        $fs = new Filesystem();
+
+        foreach (array_filter($this->tmpDataDirs) as $dir) {
+            $fs->remove($dir);
+        }
     }
 
     private function simulateRunner(string $php): Process

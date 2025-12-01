@@ -44,6 +44,7 @@ class Supervisor
     private function __construct(
         private readonly string $storageDirectory,
         private readonly array $providers,
+        private int $tickFrequency = self::DEFAULT_TICK_FREQUENCY,
     ) {
         $this->lockFactory = new LockFactory(new FlockStore($storageDirectory));
         $this->filesystem = new Filesystem();
@@ -51,9 +52,9 @@ class Supervisor
         $this->filesystem->mkdir($this->storageDirectory);
     }
 
-    public static function withDefaultProviders(string $storageDirectory): self
+    public static function withDefaultProviders(string $storageDirectory, int $tickFrequency = self::DEFAULT_TICK_FREQUENCY): self
     {
-        return new self($storageDirectory, self::getDefaultProviders());
+        return new self($storageDirectory, self::getDefaultProviders(), $tickFrequency);
     }
 
     public static function getDefaultProviders(): array
@@ -67,9 +68,9 @@ class Supervisor
     /**
      * @param array<ProviderInterface> $providers
      */
-    public static function withProviders(string $storageDirectory, array $providers): self
+    public static function withProviders(string $storageDirectory, array $providers, int $tickFrequency = self::DEFAULT_TICK_FREQUENCY): self
     {
-        return new self($storageDirectory, $providers);
+        return new self($storageDirectory, $providers, $tickFrequency);
     }
 
     /**
@@ -105,7 +106,7 @@ class Supervisor
         return $clone;
     }
 
-    public function supervise(\Closure|null $onTick = null, int $tickFrequency = self::DEFAULT_TICK_FREQUENCY): void
+    public function supervise(\Closure|null $onTick = null): void
     {
         if (!$this->canSupervise()) {
             throw new \LogicException('No provider supported, cannot supervise!');
@@ -119,7 +120,7 @@ class Supervisor
             $this->doSupervise();
 
             // we check every $tickFrequency seconds whether we need to restart processes
-            sleep($tickFrequency);
+            sleep($this->tickFrequency);
 
             if (null !== $onTick) {
                 $onTick($tick);
@@ -132,7 +133,7 @@ class Supervisor
         // still running. We have to wait for them to finish. Only then we can exit
         // ourselves otherwise we'd kill the children
         while ($this->hasRunningChildProcesses()) {
-            sleep($tickFrequency);
+            sleep($this->tickFrequency);
         }
     }
 

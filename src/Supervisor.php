@@ -15,6 +15,8 @@ use Toflar\CronjobSupervisor\Provider\WindowsTaskListProvider;
 
 class Supervisor
 {
+    private const DEFAULT_TICK_FREQUENCY = 10;
+
     private const LOCK_NAME = 'cronjob-supervisor-lock';
 
     private readonly LockFactory $lockFactory;
@@ -42,6 +44,7 @@ class Supervisor
     private function __construct(
         private readonly string $storageDirectory,
         private readonly array $providers,
+        private readonly int $tickFrequency = self::DEFAULT_TICK_FREQUENCY,
     ) {
         $this->lockFactory = new LockFactory(new FlockStore($storageDirectory));
         $this->filesystem = new Filesystem();
@@ -49,9 +52,9 @@ class Supervisor
         $this->filesystem->mkdir($this->storageDirectory);
     }
 
-    public static function withDefaultProviders(string $storageDirectory): self
+    public static function withDefaultProviders(string $storageDirectory, int $tickFrequency = self::DEFAULT_TICK_FREQUENCY): self
     {
-        return new self($storageDirectory, self::getDefaultProviders());
+        return new self($storageDirectory, self::getDefaultProviders(), $tickFrequency);
     }
 
     public static function getDefaultProviders(): array
@@ -65,9 +68,9 @@ class Supervisor
     /**
      * @param array<ProviderInterface> $providers
      */
-    public static function withProviders(string $storageDirectory, array $providers): self
+    public static function withProviders(string $storageDirectory, array $providers, int $tickFrequency = self::DEFAULT_TICK_FREQUENCY): self
     {
-        return new self($storageDirectory, $providers);
+        return new self($storageDirectory, $providers, $tickFrequency);
     }
 
     /**
@@ -103,9 +106,6 @@ class Supervisor
         return $clone;
     }
 
-    /**
-     * @param int $onTick library is meant to be called every minute by a cronjob, so 55 seconds is default
-     */
     public function supervise(\Closure|null $onTick = null): void
     {
         if (!$this->canSupervise()) {
@@ -119,8 +119,8 @@ class Supervisor
         while (time() <= $end) {
             $this->doSupervise();
 
-            // we check every 5 seconds whether we need to restart processes, this should be fine
-            sleep(5);
+            // we check every $tickFrequency seconds whether we need to restart processes
+            sleep($this->tickFrequency);
 
             if (null !== $onTick) {
                 $onTick($tick);
@@ -133,7 +133,7 @@ class Supervisor
         // still running. We have to wait for them to finish. Only then we can exit
         // ourselves otherwise we'd kill the children
         while ($this->hasRunningChildProcesses()) {
-            sleep(5);
+            sleep($this->tickFrequency);
         }
     }
 

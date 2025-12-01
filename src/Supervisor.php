@@ -44,7 +44,7 @@ class Supervisor
     private function __construct(
         private readonly string $storageDirectory,
         private readonly array $providers,
-        private int $tickFrequency = self::DEFAULT_TICK_FREQUENCY,
+        private readonly int $tickFrequency = self::DEFAULT_TICK_FREQUENCY,
     ) {
         $this->lockFactory = new LockFactory(new FlockStore($storageDirectory));
         $this->filesystem = new Filesystem();

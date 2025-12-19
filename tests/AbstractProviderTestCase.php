@@ -103,24 +103,26 @@ abstract class AbstractProviderTestCase extends TestCase
         $p = new Process([$php, __DIR__.'/../var/runner.php', $providerClass]);
         $p->start(
             function (): void {
-                $this->assertLessThanOrEqual(6, $this->countSleepProcesses());
+                $this->assertSleepProcessCount(6);
             },
         );
 
         return $p;
     }
 
-    private function countSleepProcesses(): int
+    private function assertSleepProcessCount(int $maxAllowed): void
     {
         $ps = new Process(['ps', 'aux']);
         $ps->run();
 
         $grep = (new Process(['grep', '[s]leep']))->setInput($ps->getOutput());
         $grep->run();
+        $grepOutput = $grep->getOutput();
 
-        $wc = (new Process(['wc', '-l']))->setInput($grep->getOutput());
+        $wc = (new Process(['wc', '-l']))->setInput($grepOutput);
         $wc->run();
 
-        return (int) trim($wc->getOutput());
+        $count = (int) trim($wc->getOutput());
+        $this->assertLessThanOrEqual($maxAllowed, $count, $grepOutput);
     }
 }

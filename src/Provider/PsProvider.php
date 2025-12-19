@@ -10,6 +10,11 @@ class PsProvider implements ProviderInterface
 {
     public function isSupported(): bool
     {
+        // Not supported on Windows (cygwin could cause false-positives here)
+        if ('\\' === \DIRECTORY_SEPARATOR) {
+            return false;
+        }
+
         try {
             $process = new Process(['ps']);
             $process->mustRun();

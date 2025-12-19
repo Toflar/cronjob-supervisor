@@ -13,8 +13,7 @@ class WindowsTest extends AbstractProviderTestCase
     public static function provideProviders(): array
     {
         return [
-            'tasklist' => [new WindowsTaskListProvider()],
-            'ps' => [new PsProvider()],
+            'tasklist' => [WindowsTaskListProvider::class],
         ];
     }
 }

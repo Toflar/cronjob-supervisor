@@ -12,7 +12,7 @@ class UnixTest extends AbstractProviderTestCase
     public static function provideProviders(): array
     {
         return [
-            'ps' => [new PsProvider()],
+            'ps' => [PsProvider::class],
         ];
     }
 }

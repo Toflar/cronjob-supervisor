@@ -28,11 +28,12 @@ abstract class AbstractProviderTestCase extends TestCase
     }
 
     #[DataProvider('provideProviders')]
-    public function testSupervising(ProviderInterface $provider): void
+    public function testSupervising(string $providerClass): void
     {
-        $supervisor = Supervisor::withProviders($this->createTemporaryDirectory(), [$provider]);
+        // This supervisor instance is not the one tested! The test happens in the runner.php
+        $supervisor = Supervisor::withProviders($this->createTemporaryDirectory(), [new $providerClass()]);
         if (!$supervisor->canSupervise()) {
-            $this->fail('Cannot supervise with '.$provider::class);
+            $this->fail('Cannot supervise with '.$providerClass);
         }
 
         $start = time();
@@ -41,14 +42,14 @@ abstract class AbstractProviderTestCase extends TestCase
         $processes = [];
 
         // Simulate first cron
-        $processes[] = $this->simulateRunner($php);
+        $processes[] = $this->simulateRunner($php, $providerClass);
 
         // Simulate concurrent cron (this should NOT cause additional workers to be started!)
-        $processes[] = $this->simulateRunner($php);
+        $processes[] = $this->simulateRunner($php, $providerClass);
 
         // Simulate yet another concurrent cron (this should NOT cause additional workers
         // to be started!)
-        $processes[] = $this->simulateRunner($php);
+        $processes[] = $this->simulateRunner($php, $providerClass);
 
         while (true) {
             $oneRunning = false;
@@ -72,9 +73,19 @@ abstract class AbstractProviderTestCase extends TestCase
     }
 
     /**
-     * @return array<ProviderInterface>
+     * @return array<string, array<int, class-string<ProviderInterface>>>
      */
     abstract public static function provideProviders(): iterable;
+
+    #[AfterClass]
+    public function clearTemporaryDirectory(): void
+    {
+        $fs = new Filesystem();
+
+        foreach (array_filter($this->tmpDataDirs) as $dir) {
+            $fs->remove($dir);
+        }
+    }
 
     protected function createTemporaryDirectory(): string
     {
@@ -87,19 +98,9 @@ abstract class AbstractProviderTestCase extends TestCase
         return $dir;
     }
 
-    #[AfterClass]
-    private function clearTemporaryDirectory(): void
+    private function simulateRunner(string $php, string $providerClass): Process
     {
-        $fs = new Filesystem();
-
-        foreach (array_filter($this->tmpDataDirs) as $dir) {
-            $fs->remove($dir);
-        }
-    }
-
-    private function simulateRunner(string $php): Process
-    {
-        $p = new Process([$php, __DIR__.'/../var/runner.php']);
+        $p = new Process([$php, __DIR__.'/../var/runner.php', $providerClass]);
         $p->start(
             function (): void {
                 $this->assertLessThanOrEqual(6, $this->countSleepProcesses());

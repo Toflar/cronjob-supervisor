@@ -4,9 +4,17 @@ require_once 'vendor/autoload.php';
 
 use Symfony\Component\Process\Process;
 use Toflar\CronjobSupervisor\BasicCommand;
+use Toflar\CronjobSupervisor\Provider\ProviderInterface;
 use Toflar\CronjobSupervisor\Supervisor;
 
-(Supervisor::withDefaultProviders(__DIR__ . '/storage'))
+$providerClass = $_SERVER['argv'][1] ?? '';
+
+if (!is_a($providerClass, ProviderInterface::class, true)) {
+    echo 'Must provide a correct providerClass';
+    exit(1);
+}
+
+(Supervisor::withProviders(__DIR__ . '/storage', [new $providerClass()]))
     ->withCommand(new BasicCommand('sleep 10', 2, function () {
         return new Process(['sleep', '10']);
     }))

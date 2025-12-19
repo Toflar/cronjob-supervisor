@@ -51,18 +51,28 @@ class Supervisor
     private array $listeners = [];
 
     /**
+     * @var array<ProviderInterface>
+     */
+    private array $providers = [];
+
+    /**
      * @param array<ProviderInterface> $providers
      */
     private function __construct(
         private readonly string $storageDirectory,
-        private readonly array $providers,
+        array $providers,
         private readonly int $tickFrequency = self::DEFAULT_TICK_FREQUENCY,
     ) {
         $this->lockFactory = new LockFactory(new FlockStore($storageDirectory));
         $this->filesystem = new Filesystem();
         $this->filesystem->mkdir($this->storageDirectory);
 
-        foreach ($this->providers as $provider) {
+        foreach ($providers as $provider) {
+            if (!$provider->isSupported()) {
+                continue;
+            }
+
+            $this->providers[] = $provider;
             if ($provider instanceof InitInterface) {
                 $provider->init($this);
             }
@@ -120,9 +130,7 @@ class Supervisor
     public function canSupervise(): bool
     {
         foreach ($this->providers as $provider) {
-            if ($provider->isSupported()) {
-                return true;
-            }
+            return true;
         }
 
         return false;
@@ -290,9 +298,7 @@ class Supervisor
         }
 
         foreach ($this->providers as $provider) {
-            if ($provider->isSupported()) {
-                return $provider->isPidRunning($pid);
-            }
+            return $provider->isPidRunning($pid);
         }
 
         return false;

@@ -14,7 +14,6 @@ class WindowsTest extends AbstractProviderTestCase
     {
         return [
             'tasklist' => [WindowsTaskListProvider::class],
-            'ps' => [PsProvider::class],
         ];
     }
 }

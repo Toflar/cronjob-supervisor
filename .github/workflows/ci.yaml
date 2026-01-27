@@ -31,7 +31,7 @@ jobs:
         strategy:
             fail-fast: false
             matrix:
-                php: ['8.1', '8.2', '8.3']
+                php: ['8.1', '8.2', '8.3', '8.4', '8.5']
         steps:
             - name: Setup PHP
               uses: shivammathur/setup-php@v2
@@ -45,8 +45,8 @@ jobs:
             - name: Install the dependencies
               run: composer update --no-interaction --no-suggest
 
-            - name: Run the unit tests
-              run: composer unit-tests
+            - name: Run the unix tests
+              run: composer unix-tests
 
     tests-windows:
         name: 'Windows: PHP ${{ matrix.php }}'
@@ -54,7 +54,7 @@ jobs:
         strategy:
             fail-fast: false
             matrix:
-                php: ['8.1', '8.2', '8.3']
+                php: ['8.1', '8.2', '8.3', '8.4', '8.5']
         steps:
             - name: Set up Cygwin
               uses: egor-tensin/setup-cygwin@v4
@@ -71,5 +71,5 @@ jobs:
             - name: Install the dependencies
               run: composer update --no-interaction --no-suggest
 
-            - name: Run the unit tests
-              run: composer unit-tests
+            - name: Run the windows tests
+              run: composer windows-tests

@@ -9,12 +9,22 @@ use Symfony\Component\Lock\Exception\ExceptionInterface;
 use Symfony\Component\Lock\LockFactory;
 use Symfony\Component\Lock\Store\FlockStore;
 use Symfony\Component\Process\Process;
+use Toflar\CronjobSupervisor\Provider\FlockProvider;
+use Toflar\CronjobSupervisor\Provider\InitInterface;
 use Toflar\CronjobSupervisor\Provider\ProviderInterface;
 use Toflar\CronjobSupervisor\Provider\PsProvider;
 use Toflar\CronjobSupervisor\Provider\WindowsTaskListProvider;
 
 class Supervisor
 {
+    public const EVENT_PROCESS_STARTED = 'process-started';
+
+    public const EVENT_PROCESS_FINISHED = 'process-finished';
+
+    public const EVENT_NO_PROCESSES_RUNNING = 'no-processes-running';
+
+    private const DEFAULT_TICK_FREQUENCY = 10;
+
     private const LOCK_NAME = 'cronjob-supervisor-lock';
 
     private readonly LockFactory $lockFactory;
@@ -37,37 +47,72 @@ class Supervisor
     private array $childProcesses = [];
 
     /**
+     * @var array<string, array<callable>>
+     */
+    private array $listeners = [];
+
+    /**
+     * @var array<ProviderInterface>
+     */
+    private array $providers = [];
+
+    /**
      * @param array<ProviderInterface> $providers
      */
     private function __construct(
         private readonly string $storageDirectory,
-        private readonly array $providers,
+        array $providers,
+        private readonly int $tickFrequency = self::DEFAULT_TICK_FREQUENCY,
     ) {
         $this->lockFactory = new LockFactory(new FlockStore($storageDirectory));
         $this->filesystem = new Filesystem();
-
         $this->filesystem->mkdir($this->storageDirectory);
+
+        foreach ($providers as $provider) {
+            if (!$provider->isSupported()) {
+                continue;
+            }
+
+            $this->providers[] = $provider;
+            if ($provider instanceof InitInterface) {
+                $provider->init($this);
+            }
+        }
     }
 
-    public static function withDefaultProviders(string $storageDirectory): self
+    public function getStorageDirectory(): string
     {
-        return new self($storageDirectory, self::getDefaultProviders());
+        return $this->storageDirectory;
     }
 
+    public function on(string $eventName, callable $listener): void
+    {
+        $this->listeners[$eventName][] = $listener;
+    }
+
+    public static function withDefaultProviders(string $storageDirectory, int $tickFrequency = self::DEFAULT_TICK_FREQUENCY): self
+    {
+        return new self($storageDirectory, self::getDefaultProviders(), $tickFrequency);
+    }
+
+    /**
+     * @return array<ProviderInterface>
+     */
     public static function getDefaultProviders(): array
     {
         return [
             new WindowsTaskListProvider(),
             new PsProvider(),
+            new FlockProvider(),
         ];
     }
 
     /**
      * @param array<ProviderInterface> $providers
      */
-    public static function withProviders(string $storageDirectory, array $providers): self
+    public static function withProviders(string $storageDirectory, array $providers, int $tickFrequency = self::DEFAULT_TICK_FREQUENCY): self
     {
-        return new self($storageDirectory, $providers);
+        return new self($storageDirectory, $providers, $tickFrequency);
     }
 
     /**
@@ -87,9 +132,7 @@ class Supervisor
     public function canSupervise(): bool
     {
         foreach ($this->providers as $provider) {
-            if ($provider->isSupported()) {
-                return true;
-            }
+            return true;
         }
 
         return false;
@@ -103,9 +146,6 @@ class Supervisor
         return $clone;
     }
 
-    /**
-     * @param int $onTick library is meant to be called every minute by a cronjob, so 55 seconds is default
-     */
     public function supervise(\Closure|null $onTick = null): void
     {
         if (!$this->canSupervise()) {
@@ -119,8 +159,8 @@ class Supervisor
         while (time() <= $end) {
             $this->doSupervise();
 
-            // we check every 5 seconds whether we need to restart processes, this should be fine
-            sleep(5);
+            // we check every $tickFrequency seconds whether we need to restart processes
+            sleep($this->tickFrequency);
 
             if (null !== $onTick) {
                 $onTick($tick);
@@ -133,19 +173,25 @@ class Supervisor
         // still running. We have to wait for them to finish. Only then we can exit
         // ourselves otherwise we'd kill the children
         while ($this->hasRunningChildProcesses()) {
-            sleep(5);
+            sleep($this->tickFrequency);
         }
     }
 
     private function hasRunningChildProcesses(): bool
     {
-        foreach ($this->childProcesses as $process) {
+        $hasRunning = false;
+
+        foreach ($this->childProcesses as $pid => $process) {
             if ($process->isRunning()) {
-                return true;
+                $hasRunning = true;
+                continue;
             }
+
+            unset($this->childProcesses[$pid]);
+            $this->dispatch(self::EVENT_PROCESS_FINISHED, $pid);
         }
 
-        return false;
+        return $hasRunning;
     }
 
     private function doSupervise(): void
@@ -161,7 +207,11 @@ class Supervisor
                 }
 
                 // Update the storage with still running processes
-                $this->checkRunningProcesses();
+                $running = $this->checkRunningProcesses();
+
+                if (0 === $running) {
+                    $this->dispatch(self::EVENT_NO_PROCESSES_RUNNING);
+                }
 
                 // Pad commands
                 foreach ($this->commands as $command) {
@@ -174,22 +224,27 @@ class Supervisor
         );
     }
 
-    private function checkRunningProcesses(): void
+    private function checkRunningProcesses(): int
     {
+        $running = 0;
         $storageNew = [];
 
         foreach ($this->storage as $commandLine => $pids) {
             foreach ($pids as $pid) {
                 if ($this->isRunningPid($pid)) {
                     $storageNew[$commandLine][] = $pid;
+                    ++$running;
                 } else {
                     // Remove the PID from our own child processes if it's not running anymore
                     unset($this->childProcesses[$pid]);
+                    $this->dispatch(self::EVENT_PROCESS_FINISHED, $pid);
                 }
             }
         }
 
         $this->storage = $storageNew;
+
+        return $running;
     }
 
     private function padCommand(CommandInterface $command): void
@@ -200,13 +255,15 @@ class Supervisor
         if ($required > 0) {
             for ($i = 0; $i < $required; ++$i) {
                 $process = $command->startNewProcess();
+                $pid = $process->getPid();
 
-                if (null !== $process->getPid()) {
-                    $this->storage[$command->getIdentifier()][] = $process->getPid();
+                if (null !== $pid) {
+                    $this->storage[$command->getIdentifier()][] = $pid;
 
                     // Remember started child processes because we have to remain running in order
                     // for those child processes not to get killed.
-                    $this->childProcesses[$process->getPid()] = $process;
+                    $this->childProcesses[$pid] = $process;
+                    $this->dispatch(self::EVENT_PROCESS_STARTED, $pid);
                 }
             }
         }
@@ -237,12 +294,22 @@ class Supervisor
 
     private function isRunningPid(int $pid): bool
     {
+        // Track the processes started by us directly
+        if (isset($this->childProcesses[$pid])) {
+            return $this->childProcesses[$pid]->isRunning();
+        }
+
         foreach ($this->providers as $provider) {
-            if ($provider->isSupported()) {
-                return $provider->isPidRunning($pid);
-            }
+            return $provider->isPidRunning($pid);
         }
 
         return false;
+    }
+
+    private function dispatch(string $event, ...$arguments): void
+    {
+        foreach ($this->listeners[$event] ?? [] as $listener) {
+            $listener(...$arguments);
+        }
     }
 }

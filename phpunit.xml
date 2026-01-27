@@ -9,8 +9,11 @@
          failOnRisky="true"
          failOnWarning="true">
     <testsuites>
-        <testsuite name="default">
-            <directory>tests</directory>
+        <testsuite name="windows">
+            <directory>tests/Windows</directory>
+        </testsuite>
+        <testsuite name="unix">
+            <directory>tests/Unix</directory>
         </testsuite>
     </testsuites>
 

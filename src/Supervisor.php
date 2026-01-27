@@ -9,6 +9,7 @@ use Symfony\Component\Lock\Exception\ExceptionInterface;
 use Symfony\Component\Lock\LockFactory;
 use Symfony\Component\Lock\Store\FlockStore;
 use Symfony\Component\Process\Process;
+use Toflar\CronjobSupervisor\Provider\FlockProvider;
 use Toflar\CronjobSupervisor\Provider\InitInterface;
 use Toflar\CronjobSupervisor\Provider\ProviderInterface;
 use Toflar\CronjobSupervisor\Provider\PsProvider;
@@ -102,6 +103,7 @@ class Supervisor
         return [
             new WindowsTaskListProvider(),
             new PsProvider(),
+            new FlockProvider(),
         ];
     }
 

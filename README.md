@@ -41,7 +41,8 @@ ever your maximum number of processes will be created.
 
 For this to work, it uses multiple providers to check if processes are still running. Currently supported are:
 
-* `ps -p <pid>`
-* `tasklist /FI PID eq <pid>`
+* `ps -p <pid>` [Linux]
+* `tasklist /FI PID eq <pid>` [Windows]
+* `flock` - [Linux, Windows] 
 
-Which means you should be able to run it on most Linux and Windows combinations.
+Which means it runs everywhere (`flock` as the fallback).

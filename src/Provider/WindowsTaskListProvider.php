@@ -15,7 +15,7 @@ class WindowsTaskListProvider implements ProviderInterface
         }
 
         try {
-            $process = new Process(['tasklist']);
+            $process = new Process(['tasklist', '/FI', 'PID eq 0']);
             $process->mustRun();
 
             return true;

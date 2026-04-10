@@ -172,26 +172,19 @@ class Supervisor
         // Okay, we are done supervising. Now we might have child processes that are
         // still running. We have to wait for them to finish. Only then we can exit
         // ourselves otherwise we'd kill the children
-        while ($this->hasRunningChildProcesses()) {
-            sleep($this->tickFrequency);
-        }
+        $this->waitForRunningChildProcesses();
     }
 
-    private function hasRunningChildProcesses(): bool
+    private function waitForRunningChildProcesses(): void
     {
-        $hasRunning = false;
-
         foreach ($this->childProcesses as $pid => $process) {
             if ($process->isRunning()) {
-                $hasRunning = true;
-                continue;
+                $process->wait();
             }
 
             unset($this->childProcesses[$pid]);
             $this->dispatch(self::EVENT_PROCESS_FINISHED, $pid);
         }
-
-        return $hasRunning;
     }
 
     private function doSupervise(): void

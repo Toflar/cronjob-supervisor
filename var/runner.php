@@ -16,13 +16,13 @@ if (!is_a($providerClass, ProviderInterface::class, true)) {
 
 (Supervisor::withProviders(__DIR__ . '/storage', [new $providerClass()]))
     ->withCommand(new BasicCommand('sleep 10', 2, function () {
-        return new Process(['sleep', '10']);
+        return new Process(['sleep', '10'], timeout: null);
     }))
     ->withCommand(new BasicCommand('sleep 20', 2, function() {
-        return new Process(['sleep', '20']);
+        return new Process(['sleep', '20'], timeout: null);
     }))
     ->withCommand(new BasicCommand('sleep 100', 2, function() {
-        return new Process(['sleep', '100']);  // Mock a process that will take longer than the 55 seconds of the supervisor itself
+        return new Process(['sleep', '100'], timeout: null);  // Mock a process that will take longer than the 55 seconds of the supervisor itself
     }))
     ->supervise(function(int $tick) {
         echo 'Tick: ' . $tick;

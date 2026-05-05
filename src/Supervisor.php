@@ -152,15 +152,16 @@ class Supervisor
             throw new \LogicException('No provider supported, cannot supervise!');
         }
 
-        $end = time() + 55;
+        $end = microtime(true) + 55;
         $tick = 1;
+        $frequency = $this->tickFrequency * 1000 * 1000;
 
         // Supervise for as long as we did not hit $end
-        while (time() <= $end) {
+        while (microtime(true) <= $end) {
             $this->doSupervise();
 
             // we check every $tickFrequency seconds whether we need to restart processes
-            sleep($this->tickFrequency);
+            usleep((int) max(0, min($frequency, ($end - microtime(true)) * 1000 * 1000)));
 
             if (null !== $onTick) {
                 $onTick($tick);

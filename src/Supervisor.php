@@ -157,11 +157,11 @@ class Supervisor
         $frequency = $this->tickFrequency * 1000 * 1000;
 
         // Supervise for as long as we did not hit $end
-        while (microtime(true) <= $end) {
+        while (microtime(true) < $end) {
             $this->doSupervise();
 
             // we check every $tickFrequency seconds whether we need to restart processes
-            if (($delta = $end - microtime(true)) <= 0) {
+            if (($delta = $end - microtime(true)) < 0) {
                 break;
             }
 

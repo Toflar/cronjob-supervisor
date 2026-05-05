@@ -161,11 +161,16 @@ class Supervisor
             $this->doSupervise();
 
             // we check every $tickFrequency seconds whether we need to restart processes
-            if (($delta = $end - microtime(true)) < 0) {
+            if (($delta = $end - microtime(true)) <= 0) {
                 break;
             }
 
-            usleep((int) min($frequency, $delta * 1000 * 1000));
+            $sleep = (int) min($frequency, $delta * 1000 * 1000);
+            if ($sleep <= 0) {
+                break;
+            }
+
+            usleep($sleep);
 
             if (null !== $onTick) {
                 $onTick($tick);

@@ -8,12 +8,12 @@ use Symfony\Component\Process\Process;
 
 class BasicCommand implements CommandInterface
 {
+    /**
+     * @param \Closure(): Process $createProcess
+     */
     public function __construct(
         private readonly string $identifier,
         private readonly int $numProcs,
-        /**
-         * @var \Closure():Process
-         */
         private readonly \Closure $createProcess,
     ) {
     }

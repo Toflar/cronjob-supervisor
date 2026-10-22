@@ -10,9 +10,9 @@ use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\PhpExecutableFinder;
 use Symfony\Component\Process\Process;
-use Toflar\CronjobSupervisor\CommandInterface;
 use Toflar\CronjobSupervisor\Provider\ProviderInterface;
 use Toflar\CronjobSupervisor\Supervisor;
+use Toflar\CronjobSupervisor\Test\Fixtures\SequenceCommand;
 
 abstract class AbstractProviderTestCase extends TestCase
 {
@@ -105,9 +105,9 @@ abstract class AbstractProviderTestCase extends TestCase
         $noisy = $this->createWorker($directory, 'noisy');
         $betweenTicks = $this->createWorker($directory, 'between-ticks');
         $supervisor = Supervisor::withProviders($directory, [new $providerClass()])
-            ->withCommand($this->oneShotCommand('waiting', $waiting))
-            ->withCommand($this->oneShotCommand('noisy', $noisy))
-            ->withCommand($this->oneShotCommand('between-ticks', $betweenTicks))
+            ->withCommand(new SequenceCommand('waiting', [$waiting]))
+            ->withCommand(new SequenceCommand('noisy', [$noisy]))
+            ->withCommand(new SequenceCommand('between-ticks', [$betweenTicks]))
         ;
         $observer = new $providerClass();
         Supervisor::withProviders($directory, [$observer]);
@@ -149,17 +149,67 @@ abstract class AbstractProviderTestCase extends TestCase
      * @param class-string<ProviderInterface> $providerClass
      */
     #[DataProvider('provideProviders')]
-    public function testSupervisionPreservesConfiguredProcessTimeoutsWhenDraining(string $providerClass): void
+    public function testTimeoutsAreHandledDuringPollingAndDrainingWithoutInterruptingSiblings(string $providerClass): void
     {
         $directory = $this->createTemporaryDirectory();
-        $process = $this->createWorker($directory, 'timeout');
-        $process->setTimeout(0.1);
+        $general = $this->createWorker($directory, 'timeout')->setTimeout(0.1);
+        $replacement = $this->createWorker($directory, 'between-ticks');
+        $idle = $this->createWorker($directory, 'timeout')->setIdleTimeout(0.1);
+        $draining = $this->createWorker($directory, 'timeout')->setTimeout(55.1);
+        $healthy = $this->createWorker($directory, 'waiting');
         $supervisor = Supervisor::withProviders($directory, [new $providerClass()])
-            ->withCommand($this->oneShotCommand('timeout', $process))
+            ->withCommand(new SequenceCommand('general', [$general, $replacement]))
+            ->withCommand(new SequenceCommand('idle', [$idle]))
+            ->withCommand(new SequenceCommand('draining', [$draining]))
+            ->withCommand(new SequenceCommand('healthy', [$healthy]))
         ;
+        $timeouts = [];
+        $finished = [];
+        $fs = new Filesystem();
+        $supervisor->on(
+            Supervisor::EVENT_PROCESS_TIMED_OUT,
+            function (int $pid, ProcessTimedOutException $exception) use (&$timeouts, $draining, $healthy, $fs, $directory): void {
+                $timeouts[] = $exception;
+                if ($exception->getProcess() === $draining) {
+                    $this->assertTrue($healthy->isRunning());
+                    $fs->touch($directory.'/finished');
+                }
+            },
+        );
+        $supervisor->on(
+            Supervisor::EVENT_PROCESS_FINISHED,
+            static function (int $pid) use (&$finished): void {
+                $finished[] = $pid;
+            },
+        );
 
-        $this->expectException(ProcessTimedOutException::class);
-        $supervisor->supervise();
+        $supervisor->supervise(
+            function (int $tick) use (&$timeouts, $general, $idle, $replacement, $fs, $directory): void {
+                if (1 === $tick) {
+                    $this->assertCount(2, $timeouts);
+                    $this->assertFalse($general->isRunning());
+                    $this->assertFalse($idle->isRunning());
+                }
+
+                if (2 === $tick) {
+                    $this->assertTrue($replacement->isStarted());
+                    $this->assertTrue($fs->exists($directory.'/between-ticks-output-finished'));
+                }
+            },
+        );
+
+        $this->assertCount(3, $timeouts);
+
+        foreach ([[$general, true], [$idle, false], [$draining, true]] as [$process, $isGeneral]) {
+            $matching = array_values(array_filter($timeouts, static fn (ProcessTimedOutException $exception): bool => $exception->getProcess() === $process));
+            $this->assertCount(1, $matching);
+            $this->assertSame($isGeneral, $matching[0]->isGeneralTimeout());
+            $this->assertSame(!$isGeneral, $matching[0]->isIdleTimeout());
+        }
+
+        $this->assertCount(5, $finished);
+        $this->assertSame(0, $healthy->getExitCode());
+        $this->assertSame(0, $replacement->getExitCode());
     }
 
     /**
@@ -181,34 +231,6 @@ abstract class AbstractProviderTestCase extends TestCase
     private function createWorker(string $directory, string $role): Process
     {
         return $this->workerProcesses[] = new Process([PHP_BINARY, __DIR__.'/Fixtures/child-process-worker.php', $directory, $role], timeout: null);
-    }
-
-    private function oneShotCommand(string $identifier, Process $process): CommandInterface
-    {
-        return new class($identifier, $process) implements CommandInterface {
-            public function __construct(
-                private readonly string $identifier,
-                private readonly Process $process,
-            ) {
-            }
-
-            public function getIdentifier(): string
-            {
-                return $this->identifier;
-            }
-
-            public function getNumProcs(): int
-            {
-                return $this->process->isStarted() ? 0 : 1;
-            }
-
-            public function startNewProcess(): Process
-            {
-                $this->process->start();
-
-                return $this->process;
-            }
-        };
     }
 
     private function simulateRunner(string $php, string $providerClass): Process

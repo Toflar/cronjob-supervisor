@@ -8,6 +8,7 @@ use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Lock\Exception\ExceptionInterface;
 use Symfony\Component\Lock\LockFactory;
 use Symfony\Component\Lock\Store\FlockStore;
+use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\Process;
 use Toflar\CronjobSupervisor\Provider\FlockProvider;
 use Toflar\CronjobSupervisor\Provider\InitInterface;
@@ -20,6 +21,8 @@ class Supervisor
     public const EVENT_PROCESS_STARTED = 'process-started';
 
     public const EVENT_PROCESS_FINISHED = 'process-finished';
+
+    public const EVENT_PROCESS_TIMED_OUT = 'process-timed-out';
 
     public const EVENT_NO_PROCESSES_RUNNING = 'no-processes-running';
 
@@ -191,9 +194,7 @@ class Supervisor
     {
         while ([] !== $this->childProcesses) {
             foreach ($this->childProcesses as $pid => $process) {
-                if ($process->isRunning()) {
-                    $process->checkTimeout();
-
+                if ($this->isChildRunning($pid, $process)) {
                     continue;
                 }
 
@@ -212,8 +213,8 @@ class Supervisor
         $end = hrtime(true) + $microseconds * 1000;
 
         while (true) {
-            foreach ($this->childProcesses as $process) {
-                $process->isRunning();
+            foreach ($this->childProcesses as $pid => $process) {
+                $this->isChildRunning($pid, $process);
             }
 
             $remaining = (int) (($end - hrtime(true)) / 1000);
@@ -327,7 +328,7 @@ class Supervisor
     {
         // Track the processes started by us directly
         if (isset($this->childProcesses[$pid])) {
-            return $this->childProcesses[$pid]->isRunning();
+            return $this->isChildRunning($pid, $this->childProcesses[$pid]);
         }
 
         foreach ($this->providers as $provider) {
@@ -335,6 +336,23 @@ class Supervisor
         }
 
         return false;
+    }
+
+    private function isChildRunning(int $pid, Process $process): bool
+    {
+        if (!$process->isRunning()) {
+            return false;
+        }
+
+        try {
+            $process->checkTimeout();
+        } catch (ProcessTimedOutException $exception) {
+            $this->dispatch(self::EVENT_PROCESS_TIMED_OUT, $pid, $exception);
+
+            return false;
+        }
+
+        return true;
     }
 
     private function dispatch(string $event, ...$arguments): void

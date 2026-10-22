@@ -62,3 +62,10 @@ by Symfony Process for the lifetime of the Process object and can spill to tempo
 A timed-out worker is stopped without aborting supervision of other workers. Its slot is replaced on the next
 supervision tick. Listen to `Supervisor::EVENT_PROCESS_TIMED_OUT` to receive the PID and the Symfony
 `ProcessTimedOutException`. The regular `EVENT_PROCESS_FINISHED` event still follows when the worker is collected.
+
+### Batched process checks
+
+Native providers check workers owned by other runners in batches on each supervision tick. Unix uses bounded
+`ps` queries and Windows uses one `tasklist` query, instead of starting a command for every PID.
+Owned children continue to use Symfony Process directly. Custom providers retain individual PID checks unless
+they implement `BatchProviderInterface`. Failed batch queries fall back to individual checks.

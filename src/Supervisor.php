@@ -10,6 +10,7 @@ use Symfony\Component\Lock\LockFactory;
 use Symfony\Component\Lock\Store\FlockStore;
 use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\Process;
+use Toflar\CronjobSupervisor\Provider\BatchProviderInterface;
 use Toflar\CronjobSupervisor\Provider\FlockProvider;
 use Toflar\CronjobSupervisor\Provider\InitInterface;
 use Toflar\CronjobSupervisor\Provider\ProviderInterface;
@@ -259,12 +260,13 @@ class Supervisor
     private function checkRunningProcesses(): int
     {
         $finishedChildren = $this->collectFinishedChildProcesses();
+        $runningPids = $this->getRunningPidLookup();
         $running = 0;
         $storageNew = [];
 
         foreach ($this->storage as $commandLine => $pids) {
             foreach ($pids as $pid) {
-                if ($this->isRunningPid($pid)) {
+                if ($this->isRunningPid($pid, $runningPids)) {
                     $storageNew[$commandLine][] = $pid;
                     ++$running;
                 } else {
@@ -348,7 +350,10 @@ class Supervisor
         }
     }
 
-    private function isRunningPid(int $pid): bool
+    /**
+     * @param array<int, true>|null $runningPids
+     */
+    private function isRunningPid(int $pid, array|null $runningPids): bool
     {
         // Track the processes started by us directly
         if (isset($this->childProcesses[$pid])) {
@@ -356,10 +361,40 @@ class Supervisor
         }
 
         foreach ($this->providers as $provider) {
-            return $provider->isPidRunning($pid);
+            return null === $runningPids ? $provider->isPidRunning($pid) : isset($runningPids[$pid]);
         }
 
         return false;
+    }
+
+    /**
+     * @return array<int, true>|null
+     */
+    private function getRunningPidLookup(): array|null
+    {
+        $provider = $this->providers[0] ?? null;
+        if (!$provider instanceof BatchProviderInterface) {
+            return null;
+        }
+
+        $pids = [];
+
+        foreach ($this->storage as $commandPids) {
+            foreach ($commandPids as $pid) {
+                if (!isset($this->childProcesses[$pid])) {
+                    $pids[] = $pid;
+                }
+            }
+        }
+
+        if ([] === $pids) {
+            return null;
+        }
+
+        // Keep individual PID checks available when the batch query fails
+        $running = $provider->getRunningPids($pids);
+
+        return null === $running ? null : array_fill_keys($running, true);
     }
 
     private function isChildRunning(int $pid, Process $process): bool

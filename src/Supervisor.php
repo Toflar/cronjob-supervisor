@@ -25,6 +25,8 @@ class Supervisor
 
     private const DEFAULT_TICK_FREQUENCY = 10;
 
+    private const CHILD_POLL_INTERVAL = 100000;
+
     private const LOCK_NAME = 'cronjob-supervisor-lock';
 
     private readonly LockFactory $lockFactory;
@@ -170,7 +172,7 @@ class Supervisor
                 break;
             }
 
-            usleep($sleep);
+            $this->sleepAndPollChildren($sleep);
 
             if (null !== $onTick) {
                 $onTick($tick);
@@ -187,13 +189,39 @@ class Supervisor
 
     private function waitForRunningChildProcesses(): void
     {
-        foreach ($this->childProcesses as $pid => $process) {
-            if ($process->isRunning()) {
-                $process->wait();
+        while ([] !== $this->childProcesses) {
+            foreach ($this->childProcesses as $pid => $process) {
+                if ($process->isRunning()) {
+                    $process->checkTimeout();
+
+                    continue;
+                }
+
+                unset($this->childProcesses[$pid]);
+                $this->dispatch(self::EVENT_PROCESS_FINISHED, $pid);
             }
 
-            unset($this->childProcesses[$pid]);
-            $this->dispatch(self::EVENT_PROCESS_FINISHED, $pid);
+            if ([] !== $this->childProcesses) {
+                usleep(self::CHILD_POLL_INTERVAL);
+            }
+        }
+    }
+
+    private function sleepAndPollChildren(int $microseconds): void
+    {
+        $end = hrtime(true) + $microseconds * 1000;
+
+        while (true) {
+            foreach ($this->childProcesses as $process) {
+                $process->isRunning();
+            }
+
+            $remaining = (int) (($end - hrtime(true)) / 1000);
+            if ($remaining <= 0) {
+                return;
+            }
+
+            usleep(min(self::CHILD_POLL_INTERVAL, $remaining));
         }
     }
 

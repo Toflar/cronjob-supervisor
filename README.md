@@ -46,3 +46,19 @@ For this to work, it uses multiple providers to check if processes are still run
 * `flock` - [Linux, Windows] 
 
 Which means it runs everywhere (`flock` as the fallback).
+
+### Worker timeouts and output
+
+The supervisor respects each Symfony Process timeout, including idle timeouts. Symfony Process defaults to a
+60-second timeout. For workers intended to run indefinitely, explicitly create them with `timeout: null`:
+
+```php
+return (new Process(['php', 'worker.php'], timeout: null))->disableOutput();
+```
+
+Disable output when it is not needed, or redirect worker logs to a managed destination. Captured output is retained
+by Symfony Process for the lifetime of the Process object and can spill to temporary files.
+
+A timed-out worker is stopped without aborting supervision of other workers. Its slot is replaced on the next
+supervision tick. Listen to `Supervisor::EVENT_PROCESS_TIMED_OUT` to receive the PID and the Symfony
+`ProcessTimedOutException`. The regular `EVENT_PROCESS_FINISHED` event still follows when the worker is collected.

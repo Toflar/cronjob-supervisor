@@ -355,7 +355,7 @@ class Supervisor
         return true;
     }
 
-    private function dispatch(string $event, ...$arguments): void
+    private function dispatch(string $event, mixed ...$arguments): void
     {
         foreach ($this->listeners[$event] ?? [] as $listener) {
             $listener(...$arguments);

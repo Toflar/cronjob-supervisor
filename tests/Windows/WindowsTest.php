@@ -8,13 +8,11 @@ use Toflar\CronjobSupervisor\Provider\FlockProvider;
 use Toflar\CronjobSupervisor\Provider\WindowsTaskListProvider;
 use Toflar\CronjobSupervisor\Test\AbstractProviderTestCase;
 
-class WindowsTest extends AbstractProviderTestCase
+final class WindowsTest extends AbstractProviderTestCase
 {
-    public static function provideProviders(): array
+    public static function provideProviders(): \Iterator
     {
-        return [
-            'tasklist' => [WindowsTaskListProvider::class],
-            'flock' => [FlockProvider::class],
-        ];
+        yield 'tasklist' => [WindowsTaskListProvider::class];
+        yield 'flock' => [FlockProvider::class];
     }
 }

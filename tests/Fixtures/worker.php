@@ -5,6 +5,8 @@ declare(strict_types=1);
 require_once __DIR__.'/../../vendor/autoload.php';
 
 use Symfony\Component\Filesystem\Filesystem;
+use Symfony\Component\Lock\LockFactory;
+use Symfony\Component\Lock\Store\FlockStore;
 
 $directory = $argv[1] ?? '';
 $identifier = $argv[2] ?? '';
@@ -15,7 +17,14 @@ if ('' === $directory || '' === $identifier || $duration <= 0) {
 $fs = new Filesystem();
 $fs->mkdir($directory.'/workers');
 $marker = $directory.'/workers/'.getmypid().'.json';
-$fs->dumpFile($marker, json_encode(['identifier' => $identifier], JSON_THROW_ON_ERROR));
+$lock = (new LockFactory(new FlockStore($directory)))->createLock('worker-markers');
+$lock->acquire(true);
+
+try {
+    $fs->dumpFile($marker, json_encode(['identifier' => $identifier], JSON_THROW_ON_ERROR));
+} finally {
+    $lock->release();
+}
 
 try {
     // Keep the initial workers alive until every configured slot has been observed by the test
@@ -29,5 +38,11 @@ try {
         usleep(50000);
     }
 } finally {
-    $fs->remove($marker);
+    $lock->acquire(true);
+
+    try {
+        $fs->remove($marker);
+    } finally {
+        $lock->release();
+    }
 }

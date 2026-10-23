@@ -7,6 +7,8 @@ namespace Toflar\CronjobSupervisor\Test;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Filesystem\Filesystem;
+use Symfony\Component\Lock\LockFactory;
+use Symfony\Component\Lock\Store\FlockStore;
 use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\PhpExecutableFinder;
 use Symfony\Component\Process\Process;
@@ -290,16 +292,23 @@ abstract class AbstractProviderTestCase extends TestCase
     {
         $counts = ['short' => 0, 'medium' => 0, 'long' => 0];
 
-        foreach (glob($directory.'/workers/*.json') ?: [] as $file) {
-            $contents = @file_get_contents($file);
-            if (false === $contents) {
-                continue;
-            }
+        $lock = (new LockFactory(new FlockStore($directory)))->createLock('worker-markers');
+        $lock->acquire(true);
 
-            $marker = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
-            $this->assertArrayHasKey($marker['identifier'], $counts);
-            ++$counts[$marker['identifier']];
-            $this->seenWorkers[$marker['identifier']][basename($file)] = true;
+        try {
+            foreach (glob($directory.'/workers/*.json') ?: [] as $file) {
+                $contents = @file_get_contents($file);
+                if (false === $contents) {
+                    continue;
+                }
+
+                $marker = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
+                $this->assertArrayHasKey($marker['identifier'], $counts);
+                ++$counts[$marker['identifier']];
+                $this->seenWorkers[$marker['identifier']][basename($file)] = true;
+            }
+        } finally {
+            $lock->release();
         }
 
         foreach ($counts as $identifier => $count) {

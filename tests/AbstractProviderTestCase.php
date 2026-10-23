@@ -12,6 +12,7 @@ use Symfony\Component\Lock\Store\FlockStore;
 use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\PhpExecutableFinder;
 use Symfony\Component\Process\Process;
+use Toflar\CronjobSupervisor\BasicCommand;
 use Toflar\CronjobSupervisor\Provider\ProviderInterface;
 use Toflar\CronjobSupervisor\Supervisor;
 use Toflar\CronjobSupervisor\Test\Fixtures\SequenceCommand;
@@ -222,6 +223,74 @@ abstract class AbstractProviderTestCase extends TestCase
         $this->assertCount(5, $finished);
         $this->assertSame(0, $healthy->getExitCode());
         $this->assertSame(0, $replacement->getExitCode());
+    }
+
+    public function testReusedPidIsCheckedWithoutTheFinishedChildObject(): void
+    {
+        $directory = $this->createTemporaryDirectory();
+        $pid = 12345;
+        $ownedRunning = true;
+        $process = $this->createMock(Process::class);
+        $process
+            ->expects($this->once())
+            ->method('start')
+        ;
+
+        $process
+            ->method('getPid')
+            ->willReturn($pid)
+        ;
+        $process
+            ->method('isRunning')
+            ->willReturnCallback(
+                static function () use (&$ownedRunning): bool {
+                    return $ownedRunning;
+                },
+            )
+        ;
+        $provider = $this->createMock(ProviderInterface::class);
+        $provider
+            ->method('isSupported')
+            ->willReturn(true)
+        ;
+
+        $provider
+            ->expects($this->atLeastOnce())
+            ->method('isPidRunning')
+            ->with($pid)
+            ->willReturn(true)
+        ;
+
+        $supervisor = Supervisor::withProviders($directory, [$provider], 1)
+            ->withCommand(new BasicCommand('worker', 1, static fn (): Process => $process))
+        ;
+        $finished = [];
+        $supervisor->on(
+            Supervisor::EVENT_PROCESS_FINISHED,
+            static function (int $finishedPid) use (&$finished): void {
+                $finished[] = $finishedPid;
+            },
+        );
+        $done = new \RuntimeException('Test supervision complete.');
+
+        try {
+            $supervisor->supervise(
+                static function (int $tick) use (&$ownedRunning, $done): void {
+                    // Another runner has replaced our finished worker with a new process using the same PID
+                    $ownedRunning = false;
+                    if (2 === $tick) {
+                        throw $done;
+                    }
+                },
+            );
+        } catch (\RuntimeException $exception) {
+            if ($exception !== $done) {
+                throw $exception;
+            }
+        }
+
+        $this->assertSame([$pid], $finished);
+        $this->assertSame(['worker' => [$pid]], json_decode((string) file_get_contents($directory.'/storage.json'), true, 512, JSON_THROW_ON_ERROR));
     }
 
     /**

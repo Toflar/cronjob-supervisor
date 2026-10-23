@@ -17,9 +17,14 @@ use Toflar\CronjobSupervisor\Test\Fixtures\SequenceCommand;
 abstract class AbstractProviderTestCase extends TestCase
 {
     /**
-     * @var array<string>
+     * @var list<string>
      */
     protected array $tmpDataDirs = [];
+
+    /**
+     * @var list<Process>
+     */
+    private array $runners = [];
 
     /**
      * @var list<Process>
@@ -27,6 +32,11 @@ abstract class AbstractProviderTestCase extends TestCase
     private array $workerProcesses = [];
 
     private int|null $noisyPid = null;
+
+    /**
+     * @var array<string, array<string, true>>
+     */
+    private array $seenWorkers = [];
 
     protected function tearDown(): void
     {
@@ -36,14 +46,22 @@ abstract class AbstractProviderTestCase extends TestCase
 
         $fs = new Filesystem();
 
-        foreach (array_filter($this->tmpDataDirs) as $dir) {
-            $fs->remove($dir);
+        foreach ($this->tmpDataDirs as $directory) {
+            $fs->touch($directory.'/stop');
         }
+
+        foreach ($this->runners as $runner) {
+            $runner->stop(1);
+        }
+
+        // Give portable fixture workers time to notice the stop marker before removing their directory
+        usleep(200000);
+        $fs->remove($this->tmpDataDirs);
     }
 
     public function testCanSupervise(): void
     {
-        $supervisor = Supervisor::withProviders(sys_get_temp_dir(), []);
+        $supervisor = Supervisor::withProviders($this->createTemporaryDirectory(), []);
         $this->assertFalse($supervisor->canSupervise());
         $this->assertFalse(Supervisor::canSuperviseWithProviders([]));
     }
@@ -51,46 +69,38 @@ abstract class AbstractProviderTestCase extends TestCase
     #[DataProvider('provideProviders')]
     public function testSupervising(string $providerClass): void
     {
-        // This supervisor instance is not the one tested! The test happens in the runner.php
-        $supervisor = Supervisor::withProviders($this->createTemporaryDirectory(), [new $providerClass()]);
-        if (!$supervisor->canSupervise()) {
-            $this->fail('Cannot supervise with '.$providerClass);
-        }
-
-        $start = time();
+        // This supervisor instance is not the one tested. The test happens in the fixture runner.php
+        $directory = $this->createTemporaryDirectory();
+        $supervisor = Supervisor::withProviders($directory, [new $providerClass()]);
+        $this->assertTrue($supervisor->canSupervise(), 'Cannot supervise with '.$providerClass);
         $php = (new PhpExecutableFinder())->find();
-
-        $processes = [];
+        $this->assertIsString($php);
+        $start = microtime(true);
 
         // Simulate first cron
-        $processes[] = $this->simulateRunner($php, $providerClass);
+        $this->runners[] = $this->simulateRunner($php, $providerClass, $directory);
 
-        // Simulate concurrent cron (this should NOT cause additional workers to be started!)
-        $processes[] = $this->simulateRunner($php, $providerClass);
+        // Simulate concurrent cron. This should not cause additional workers to be started
+        $this->runners[] = $this->simulateRunner($php, $providerClass, $directory);
+        $this->waitForWorkers($directory);
 
-        // Simulate yet another concurrent cron (this should NOT cause additional workers
-        // to be started!)
-        $processes[] = $this->simulateRunner($php, $providerClass);
+        // Simulate another cron after workers are running. This must also respect the worker limit
+        $this->runners[] = $this->simulateRunner($php, $providerClass, $directory);
 
-        while (true) {
-            $oneRunning = false;
-
-            foreach ($processes as $process) {
-                if ($process->isRunning()) {
-                    $oneRunning = true;
-                }
-            }
-
-            if (!$oneRunning) {
-                break;
-            }
-
-            sleep(5);
+        while ($this->pollRunners()) {
+            $this->assertWorkerLimit($directory);
+            usleep(100000);
         }
 
-        // The runner.php has a process that runs 100 seconds, so our supervisor must run
-        // at least 100 seconds, otherwise it would've killed the child process
-        $this->assertGreaterThanOrEqual(100, time() - $start);
+        foreach ($this->runners as $runner) {
+            $this->assertSame(0, $runner->getExitCode(), $runner->getErrorOutput());
+        }
+
+        // The fixture runs a worker beyond the supervision window, so its parent must remain alive until it finishes
+        $this->assertGreaterThanOrEqual(62, microtime(true) - $start);
+        $this->assertGreaterThan(2, \count($this->seenWorkers['short']));
+        $this->assertGreaterThan(2, \count($this->seenWorkers['medium']));
+        $this->assertSame(['short' => 0, 'medium' => 0, 'long' => 0], $this->assertWorkerLimit($directory));
     }
 
     /**
@@ -219,11 +229,9 @@ abstract class AbstractProviderTestCase extends TestCase
 
     protected function createTemporaryDirectory(): string
     {
-        $dir = sys_get_temp_dir().'/'.uniqid('lt');
+        $dir = sys_get_temp_dir().'/cronjob-supervisor-integration-'.bin2hex(random_bytes(8));
         $this->tmpDataDirs[] = $dir;
-
-        $fs = new Filesystem();
-        $fs->mkdir($dir);
+        (new Filesystem())->mkdir($dir);
 
         return $dir;
     }
@@ -233,31 +241,71 @@ abstract class AbstractProviderTestCase extends TestCase
         return $this->workerProcesses[] = new Process([PHP_BINARY, __DIR__.'/Fixtures/child-process-worker.php', $directory, $role], timeout: null);
     }
 
-    private function simulateRunner(string $php, string $providerClass): Process
+    private function simulateRunner(string $php, string $providerClass, string $directory): Process
     {
-        $p = new Process([$php, __DIR__.'/../var/runner.php', $providerClass]);
-        $p->start(
-            function (): void {
-                $this->assertSleepProcessCount(6);
-            },
-        );
+        $process = new Process([$php, __DIR__.'/Fixtures/runner.php', $providerClass, $directory], timeout: 90);
+        $process->start();
 
-        return $p;
+        return $process;
     }
 
-    private function assertSleepProcessCount(int $maxAllowed): void
+    private function pollRunners(): bool
     {
-        $ps = new Process(['ps', 'aux']);
-        $ps->run();
+        $running = false;
 
-        $grep = (new Process(['grep', '[s]leep']))->setInput($ps->getOutput());
-        $grep->run();
-        $grepOutput = $grep->getOutput();
+        foreach ($this->runners as $runner) {
+            $runner->checkTimeout();
+            if ($runner->isRunning()) {
+                $running = true;
+            } else {
+                $this->assertSame(0, $runner->getExitCode(), $runner->getErrorOutput());
+            }
+        }
 
-        $wc = (new Process(['wc', '-l']))->setInput($grepOutput);
-        $wc->run();
+        return $running;
+    }
 
-        $count = (int) trim($wc->getOutput());
-        $this->assertLessThanOrEqual($maxAllowed, $count, $grepOutput);
+    private function waitForWorkers(string $directory): void
+    {
+        $deadline = microtime(true) + 10;
+
+        while (true) {
+            $this->assertTrue($this->pollRunners(), 'Runners exited before reaching the required worker count.');
+            $counts = $this->assertWorkerLimit($directory);
+            if (['short' => 2, 'medium' => 2, 'long' => 2] === $counts) {
+                (new Filesystem())->touch($directory.'/release');
+
+                return;
+            }
+
+            $this->assertLessThan($deadline, microtime(true), 'Workers did not reach the configured count.');
+            usleep(100000);
+        }
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function assertWorkerLimit(string $directory): array
+    {
+        $counts = ['short' => 0, 'medium' => 0, 'long' => 0];
+
+        foreach (glob($directory.'/workers/*.json') ?: [] as $file) {
+            $contents = @file_get_contents($file);
+            if (false === $contents) {
+                continue;
+            }
+
+            $marker = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
+            $this->assertArrayHasKey($marker['identifier'], $counts);
+            ++$counts[$marker['identifier']];
+            $this->seenWorkers[$marker['identifier']][basename($file)] = true;
+        }
+
+        foreach ($counts as $identifier => $count) {
+            $this->assertLessThanOrEqual(2, $count, 'Too many '.$identifier.' workers.');
+        }
+
+        return $counts;
     }
 }

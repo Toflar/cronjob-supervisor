@@ -7,8 +7,6 @@ namespace Toflar\CronjobSupervisor\Test;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Filesystem\Filesystem;
-use Symfony\Component\Lock\LockFactory;
-use Symfony\Component\Lock\Store\FlockStore;
 use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\PhpExecutableFinder;
 use Symfony\Component\Process\Process;
@@ -361,69 +359,22 @@ abstract class AbstractProviderTestCase extends TestCase
     {
         $counts = ['short' => 0, 'medium' => 0, 'long' => 0];
 
-        $lock = (new LockFactory(new FlockStore($directory)))->createLock('worker-markers');
-        $lock->acquire(true);
-
-        try {
-            foreach (glob($directory.'/workers/*.json') ?: [] as $file) {
-                $contents = @file_get_contents($file);
-                if (false === $contents) {
-                    continue;
-                }
-
-                $marker = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
-                $this->assertArrayHasKey($marker['identifier'], $counts);
-                ++$counts[$marker['identifier']];
-                $this->seenWorkers[$marker['identifier']][basename($file)] = true;
+        foreach (glob($directory.'/workers/*.json') ?: [] as $file) {
+            $contents = @file_get_contents($file);
+            if (false === $contents) {
+                continue;
             }
-        } finally {
-            $lock->release();
+
+            $marker = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
+            $this->assertArrayHasKey($marker['identifier'], $counts);
+            ++$counts[$marker['identifier']];
+            $this->seenWorkers[$marker['identifier']][basename($file)] = true;
         }
 
         foreach ($counts as $identifier => $count) {
-            if ($count > 2) {
-                $this->fail('Too many '.$identifier.' workers.'."\n".$this->getWorkerDiagnostics($directory));
-            }
-
-            $this->assertLessThanOrEqual(2, $count);
+            $this->assertLessThanOrEqual(2, $count, 'Too many '.$identifier.' workers.');
         }
 
         return $counts;
-    }
-
-    private function getWorkerDiagnostics(string $directory): string
-    {
-        $diagnostics = [];
-        $pids = [];
-        $storage = @file_get_contents($directory.'/storage.json');
-        $diagnostics[] = 'Storage: '.($storage ?: '(unreadable)');
-        $state = json_decode($storage ?: '{}', true);
-        if (\is_array($state)) {
-            foreach ($state as $records) {
-                if (\is_array($records)) {
-                    $pids = [...$pids, ...array_filter($records, \is_int(...))];
-                }
-            }
-        }
-
-        foreach (glob($directory.'/workers/*.json') ?: [] as $file) {
-            $pids[] = (int) basename($file, '.json');
-            $diagnostics[] = basename($file).': '.(@file_get_contents($file) ?: '(removed)');
-        }
-
-        foreach (glob($directory.'/runner-*.jsonl') ?: [] as $file) {
-            $lines = explode("\n", trim((string) file_get_contents($file)));
-            $diagnostics[] = basename($file).":\n".implode("\n", \array_slice($lines, -60));
-        }
-
-        if ('\\' === \DIRECTORY_SEPARATOR) {
-            foreach (array_unique($pids) as $pid) {
-                $process = new Process(['tasklist', '/FI', 'PID eq '.$pid, '/FO', 'CSV', '/NH']);
-                $process->run();
-                $diagnostics[] = 'PID '.$pid.': '.$process->getOutput().$process->getErrorOutput();
-            }
-        }
-
-        return implode("\n", $diagnostics);
     }
 }

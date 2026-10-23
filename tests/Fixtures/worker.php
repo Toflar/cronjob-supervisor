@@ -21,7 +21,7 @@ $lock = (new LockFactory(new FlockStore($directory)))->createLock('worker-marker
 $lock->acquire(true);
 
 try {
-    $fs->dumpFile($marker, json_encode(['identifier' => $identifier], JSON_THROW_ON_ERROR));
+    $fs->dumpFile($marker, json_encode(['identifier' => $identifier, 'runner' => getenv('CRONJOB_TEST_RUNNER_PID'), 'started' => microtime(true)], JSON_THROW_ON_ERROR));
 } finally {
     $lock->release();
 }

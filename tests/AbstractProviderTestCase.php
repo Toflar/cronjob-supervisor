@@ -312,9 +312,49 @@ abstract class AbstractProviderTestCase extends TestCase
         }
 
         foreach ($counts as $identifier => $count) {
-            $this->assertLessThanOrEqual(2, $count, 'Too many '.$identifier.' workers.');
+            if ($count > 2) {
+                $this->fail('Too many '.$identifier.' workers.'."\n".$this->getWorkerDiagnostics($directory));
+            }
+
+            $this->assertLessThanOrEqual(2, $count);
         }
 
         return $counts;
+    }
+
+    private function getWorkerDiagnostics(string $directory): string
+    {
+        $diagnostics = [];
+        $pids = [];
+        $storage = @file_get_contents($directory.'/storage.json');
+        $diagnostics[] = 'Storage: '.($storage ?: '(unreadable)');
+        $state = json_decode($storage ?: '{}', true);
+        if (\is_array($state)) {
+            foreach ($state as $records) {
+                if (\is_array($records)) {
+                    $pids = [...$pids, ...array_filter($records, \is_int(...))];
+                }
+            }
+        }
+
+        foreach (glob($directory.'/workers/*.json') ?: [] as $file) {
+            $pids[] = (int) basename($file, '.json');
+            $diagnostics[] = basename($file).': '.(@file_get_contents($file) ?: '(removed)');
+        }
+
+        foreach (glob($directory.'/runner-*.jsonl') ?: [] as $file) {
+            $lines = explode("\n", trim((string) file_get_contents($file)));
+            $diagnostics[] = basename($file).":\n".implode("\n", \array_slice($lines, -60));
+        }
+
+        if ('\\' === \DIRECTORY_SEPARATOR) {
+            foreach (array_unique($pids) as $pid) {
+                $process = new Process(['tasklist', '/FI', 'PID eq '.$pid, '/FO', 'CSV', '/NH']);
+                $process->run();
+                $diagnostics[] = 'PID '.$pid.': '.$process->getOutput().$process->getErrorOutput();
+            }
+        }
+
+        return implode("\n", $diagnostics);
     }
 }

@@ -258,6 +258,7 @@ class Supervisor
 
     private function checkRunningProcesses(): int
     {
+        $finishedChildren = $this->collectFinishedChildProcesses();
         $running = 0;
         $storageNew = [];
 
@@ -269,7 +270,9 @@ class Supervisor
                 } else {
                     // Remove the PID from our own child processes if it's not running anymore
                     unset($this->childProcesses[$pid]);
-                    $this->dispatch(self::EVENT_PROCESS_FINISHED, $pid);
+                    if (!isset($finishedChildren[$pid])) {
+                        $this->dispatch(self::EVENT_PROCESS_FINISHED, $pid);
+                    }
                 }
             }
         }
@@ -277,6 +280,27 @@ class Supervisor
         $this->storage = $storageNew;
 
         return $running;
+    }
+
+    /**
+     * @return array<int, true>
+     */
+    private function collectFinishedChildProcesses(): array
+    {
+        $finished = [];
+
+        foreach ($this->childProcesses as $pid => $process) {
+            if ($this->isChildRunning($pid, $process)) {
+                continue;
+            }
+
+            // Forget the finished child before checking a PID that another runner may have reused
+            unset($this->childProcesses[$pid]);
+            $this->dispatch(self::EVENT_PROCESS_FINISHED, $pid);
+            $finished[$pid] = true;
+        }
+
+        return $finished;
     }
 
     private function padCommand(CommandInterface $command): void
@@ -355,7 +379,7 @@ class Supervisor
         return true;
     }
 
-    private function dispatch(string $event, ...$arguments): void
+    private function dispatch(string $event, mixed ...$arguments): void
     {
         foreach ($this->listeners[$event] ?? [] as $listener) {
             $listener(...$arguments);

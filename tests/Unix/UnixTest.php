@@ -8,13 +8,11 @@ use Toflar\CronjobSupervisor\Provider\FlockProvider;
 use Toflar\CronjobSupervisor\Provider\PsProvider;
 use Toflar\CronjobSupervisor\Test\AbstractProviderTestCase;
 
-class UnixTest extends AbstractProviderTestCase
+final class UnixTest extends AbstractProviderTestCase
 {
-    public static function provideProviders(): array
+    public static function provideProviders(): \Iterator
     {
-        return [
-            'ps' => [PsProvider::class],
-            'flock' => [FlockProvider::class],
-        ];
+        yield 'ps' => [PsProvider::class];
+        yield 'flock' => [FlockProvider::class];
     }
 }

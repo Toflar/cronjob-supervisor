@@ -28,7 +28,7 @@ class PsProvider implements ProviderInterface
     public function isPidRunning(int $pid): bool
     {
         try {
-            $process = new Process(['ps', '-p', $pid]);
+            $process = new Process(['ps', '-p', (string) $pid]);
             $process->mustRun();
 
             // Check for defunct output. If the process was started within this very process,

@@ -10,7 +10,7 @@
     },
     "require-dev": {
         "phpunit/phpunit": "^10.2",
-        "terminal42/contao-build-tools": "@dev"
+        "terminal42/code-quality-tools": "@dev"
     },
     "license": "MIT",
     "autoload": {
@@ -31,11 +31,22 @@
     ],
     "config": {
         "allow-plugins": {
-            "terminal42/contao-build-tools": true
+            "terminal42/code-quality-tools": true
         }
     },
     "scripts": {
         "unix-tests": "@php vendor/bin/phpunit --testsuite=unix",
-        "windows-tests": "@php vendor/bin/phpunit --testsuite=windows"
+        "windows-tests": "@php vendor/bin/phpunit --testsuite=windows",
+        "cs-fixer": "@php vendor/terminal42/code-quality-tools/tools/ecs/vendor/bin/ecs check src tests --config vendor/terminal42/code-quality-tools/tools/ecs/config.php --fix --ansi",
+        "rector": "@php vendor/terminal42/code-quality-tools/tools/rector/vendor/bin/rector process src tests --config vendor/terminal42/code-quality-tools/tools/rector/config.php --ansi",
+        "phpstan": "@php vendor/terminal42/code-quality-tools/tools/phpstan/vendor/bin/phpstan analyze src tests --configuration vendor/terminal42/code-quality-tools/tools/phpstan/config.php --ansi",
+        "code-quality": [
+            "@php vendor/terminal42/code-quality-tools/tools/ecs/vendor/bin/ecs check src tests --config vendor/terminal42/code-quality-tools/tools/ecs/config.php --no-progress-bar --no-interaction",
+            "@php vendor/terminal42/code-quality-tools/tools/rector/vendor/bin/rector process src tests --config vendor/terminal42/code-quality-tools/tools/rector/config.php --dry-run --no-progress-bar",
+            "@phpstan",
+            "@php vendor/terminal42/code-quality-tools/tools/composer-dependency-analyser/vendor/bin/composer-dependency-analyser --config vendor/terminal42/code-quality-tools/tools/composer-dependency-analyser/config.php",
+            "@php vendor/terminal42/code-quality-tools/tools/yamllint/vendor/bin/yaml-lint .github",
+            "@composer validate --strict --no-check-publish"
+        ]
     }
 }

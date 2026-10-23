@@ -27,11 +27,18 @@ class WindowsTaskListProvider implements ProviderInterface
     public function isPidRunning(int $pid): bool
     {
         try {
-            $process = new Process(['tasklist', '/FI', "PID eq $pid"]);
+            $process = new Process(['tasklist', '/FI', "PID eq $pid", '/FO', 'CSV', '/NH']);
             $process->mustRun();
 
-            // Symfony Process starts Windows processes via cmd.exe
-            return str_contains($process->getOutput(), 'cmd.exe');
+            // Symfony Process can track cmd.exe, while other callers may track the executable directly
+            foreach (explode("\n", trim($process->getOutput())) as $line) {
+                $columns = str_getcsv(trim($line), ',', '"', '');
+                if (isset($columns[1]) && (string) $pid === $columns[1]) {
+                    return true;
+                }
+            }
+
+            return false;
         } catch (\Throwable) {
             return false;
         }

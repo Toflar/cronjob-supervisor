@@ -11,6 +11,7 @@ use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\PhpExecutableFinder;
 use Symfony\Component\Process\Process;
 use Toflar\CronjobSupervisor\BasicCommand;
+use Toflar\CronjobSupervisor\Provider\BatchProviderInterface;
 use Toflar\CronjobSupervisor\Provider\ProviderInterface;
 use Toflar\CronjobSupervisor\Supervisor;
 use Toflar\CronjobSupervisor\Test\Fixtures\SequenceCommand;
@@ -223,7 +224,11 @@ abstract class AbstractProviderTestCase extends TestCase
         $this->assertSame(0, $replacement->getExitCode());
     }
 
-    public function testReusedPidIsCheckedWithoutTheFinishedChildObject(): void
+    /**
+     * @param class-string<ProviderInterface> $providerClass
+     */
+    #[DataProvider('providePidCheckProviders')]
+    public function testReusedPidIsCheckedWithoutTheFinishedChildObject(string $providerClass): void
     {
         $directory = $this->createTemporaryDirectory();
         $pid = 12345;
@@ -246,18 +251,32 @@ abstract class AbstractProviderTestCase extends TestCase
                 },
             )
         ;
-        $provider = $this->createMock(ProviderInterface::class);
+        $provider = $this->createMock($providerClass);
         $provider
             ->method('isSupported')
             ->willReturn(true)
         ;
 
-        $provider
-            ->expects($this->atLeastOnce())
-            ->method('isPidRunning')
-            ->with($pid)
-            ->willReturn(true)
-        ;
+        if ($provider instanceof BatchProviderInterface) {
+            $provider
+                ->expects($this->atLeastOnce())
+                ->method('getRunningPids')
+                ->with([$pid])
+                ->willReturn([$pid])
+            ;
+
+            $provider
+                ->expects($this->never())
+                ->method('isPidRunning')
+            ;
+        } else {
+            $provider
+                ->expects($this->atLeastOnce())
+                ->method('isPidRunning')
+                ->with($pid)
+                ->willReturn(true)
+            ;
+        }
 
         $supervisor = Supervisor::withProviders($directory, [$provider], 1)
             ->withCommand(new BasicCommand('worker', 1, static fn (): Process => $process))
@@ -269,26 +288,116 @@ abstract class AbstractProviderTestCase extends TestCase
                 $finished[] = $finishedPid;
             },
         );
-        $done = new \RuntimeException('Test supervision complete.');
-
-        try {
-            $supervisor->supervise(
-                static function (int $tick) use (&$ownedRunning, $done): void {
-                    // Another runner has replaced our finished worker with a new process using the same PID
-                    $ownedRunning = false;
-                    if (2 === $tick) {
-                        throw $done;
-                    }
-                },
-            );
-        } catch (\RuntimeException $exception) {
-            if ($exception !== $done) {
-                throw $exception;
-            }
-        }
+        $this->superviseForTicks(
+            $supervisor,
+            2,
+            static function () use (&$ownedRunning): void {
+                // Another runner has replaced our finished worker with a new process using the same PID
+                $ownedRunning = false;
+            },
+        );
 
         $this->assertSame([$pid], $finished);
         $this->assertSame(['worker' => [$pid]], json_decode((string) file_get_contents($directory.'/storage.json'), true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * @return iterable<string, array{class-string<ProviderInterface>}>
+     */
+    public static function providePidCheckProviders(): iterable
+    {
+        yield 'individual' => [ProviderInterface::class];
+        yield 'batch' => [BatchProviderInterface::class];
+    }
+
+    public function testBatchChecksRefreshAcrossCommandsAndExcludeOwnedChildren(): void
+    {
+        $directory = $this->createTemporaryDirectory();
+        $fs = new Filesystem();
+        $fs->dumpFile($directory.'/storage.json', '{"one":[10000000],"two":[10000001]}');
+        $requests = [];
+        $provider = $this->createMock(BatchProviderInterface::class);
+        $provider
+            ->method('isSupported')
+            ->willReturn(true)
+        ;
+
+        $provider
+            ->expects($this->never())
+            ->method('isPidRunning')
+        ;
+        $provider
+            ->expects($this->exactly(2))
+            ->method('getRunningPids')
+            ->willReturnCallback(
+                static function (array $pids) use (&$requests): array {
+                    $requests[] = $pids;
+
+                    return 1 === \count($requests) ? [10000000] : [];
+                },
+            )
+        ;
+        $owned = $this->createMock(Process::class);
+        $owned
+            ->expects($this->once())
+            ->method('start')
+        ;
+
+        $owned
+            ->method('getPid')
+            ->willReturn(10000002)
+        ;
+
+        $owned
+            ->method('isRunning')
+            ->willReturn(true)
+        ;
+
+        $supervisor = Supervisor::withProviders($directory, [$provider], 1)
+            ->withCommand(new BasicCommand('owned', 1, static fn (): Process => $owned))
+        ;
+
+        $this->superviseForTicks($supervisor, 2);
+
+        $this->assertSame([[10000000, 10000001], [10000000]], $requests);
+        $this->assertSame(['owned' => [10000002]], json_decode((string) file_get_contents($directory.'/storage.json'), true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    public function testFailedBatchChecksFallBackToIndividualPidChecks(): void
+    {
+        $directory = $this->createTemporaryDirectory();
+        (new Filesystem())->dumpFile($directory.'/storage.json', '{"worker":[10000000]}');
+        $provider = $this->createMock(BatchProviderInterface::class);
+        $provider
+            ->method('isSupported')
+            ->willReturn(true)
+        ;
+
+        $provider
+            ->expects($this->once())
+            ->method('getRunningPids')
+            ->willReturn(null)
+        ;
+
+        $provider
+            ->expects($this->once())
+            ->method('isPidRunning')
+            ->with(10000000)
+            ->willReturn(true)
+        ;
+        $supervisor = Supervisor::withProviders($directory, [$provider], 1)
+            ->withCommand(new BasicCommand(
+                'worker',
+                1,
+                function (): Process {
+                    $this->fail('A running worker must not be replaced when the batch query fails.');
+                },
+            ))
+        ;
+
+        $this->superviseForTicks($supervisor, 1);
+
+        $this->assertSame(['worker' => [10000000]], json_decode((string) file_get_contents($directory.'/storage.json'), true, 512, JSON_THROW_ON_ERROR));
     }
 
     /**
@@ -303,6 +412,26 @@ abstract class AbstractProviderTestCase extends TestCase
         (new Filesystem())->mkdir($dir);
 
         return $dir;
+    }
+
+    private function superviseForTicks(Supervisor $supervisor, int $ticks, \Closure|null $onTick = null): void
+    {
+        $done = new \RuntimeException('Test supervision complete.');
+
+        try {
+            $supervisor->supervise(
+                static function (int $tick) use ($ticks, $done, $onTick): void {
+                    $onTick?->__invoke($tick);
+                    if ($tick === $ticks) {
+                        throw $done;
+                    }
+                },
+            );
+        } catch (\RuntimeException $exception) {
+            if ($exception !== $done) {
+                throw $exception;
+            }
+        }
     }
 
     private function createWorker(string $directory, string $role): Process
